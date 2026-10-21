@@ -17,7 +17,7 @@ On stock Android (Pixel 8 `user` builds):
 2. **Dual-Sensor Hotword Interception (Zero False Positives on Normal Google Search):**
    - **Sensor 1 — Assistant/Gemini Overlay Window Inspector (Works 100% standalone without ADB):** Matches only the voice overlay itself: Gemini's `FloatyActivity` (by class, or by its `assistant_robin_floaty_root_container` root view) and classic Assistant's `VoiceInteractionSession` window (`TYPE_VOICE_INTERACTION`, which accessibility reports as window type `-1`). Normal Google Search (`SearchActivity`, `GoogleAppActivity`, including the search-bar mic's voice search) and the full Gemini app (`robin.main.MainActivity`) never match: window-state events from normal Search are excluded up front, and the overlay check itself uses no text or generic view-id heuristics.
    - **Sensor 2 — `AudioManager.AudioRecordingCallback`:** Monitors live microphone recording states in real time.
-   - **No logcat sensor in the app:** since Android 13, an app reading other apps' logs needs the user's consent for every logcat session, and Android only asks while the app is on screen. A logcat hint also can't act before the overlay is on screen, which Sensor 1 already catches. The ADB daemon below still uses logcat, since `adb shell` needs no consent.
+   - **No logcat sensor in the app:** since Android 13, an app reading other apps' logs needs the user's consent for every logcat session, and Android only asks while the app is on screen. A logcat hint also can't act before the overlay is on screen, which Sensor 1 already catches.
 3. **Deterministic Microphone Handover (`ChotTrampolineActivity`):**
    - Sends `GLOBAL_ACTION_BACK` to dismiss Google's Assistant / Gemini overlay (only once it is confirmed on screen).
    - Requests `AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE` to force Google's `SpeechRecognizer` / `AudioRecord` to immediately abort.
@@ -43,13 +43,3 @@ On stock Android (Pixel 8 `user` builds):
    ```
 4. Open chot on the phone, tap **4. Claude Widget (Voice chat button)** and allow chot to create widgets. This one-time step lets chot start voice mode through Claude's own widget. Your home screen doesn't change.
 5. Say **"Hey Google"** to your Pixel 8 — Google Assistant is instantly dismissed, the mic is handed over, and Claude opens directly into Voice Mode!
-
----
-
-## Alternative: Instant Zero-Compile ADB / Shizuku Shell Daemon
-
-Want to test the hardware DSP hijack on your connected Pixel 8 immediately without building/installing an APK? Run:
-
-```bash
-./scripts/pixel8-instant-adb-daemon.sh
-```

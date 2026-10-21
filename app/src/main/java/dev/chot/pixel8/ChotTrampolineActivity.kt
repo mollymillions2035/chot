@@ -32,13 +32,36 @@ class ChotTrampolineActivity : Activity() {
                 WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
         )
 
+        val triggerSource = intent?.getStringExtra(EXTRA_TRIGGER_SOURCE) ?: "Hotword"
         val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-        if (keyguardManager?.isKeyguardLocked == true) {
-            keyguardManager.requestDismissKeyguard(this, null)
+        if (keyguardManager?.isKeyguardLocked != true) {
+            executeHandoverToClaude(triggerSource)
+            return
         }
 
-        val triggerSource = intent?.getStringExtra(EXTRA_TRIGGER_SOURCE) ?: "Hotword"
-        executeHandoverToClaude(triggerSource)
+        // Claude can't show over the lock screen, so launching it now would leave it behind the keyguard, where it
+        // never shows up after the unlock. Ask to unlock and hand over only once that succeeds.
+        ChotPrefs.appendLog(this, "[$triggerSource] Phone is locked: waiting for the unlock")
+        val lockedAt = System.currentTimeMillis()
+        keyguardManager.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
+            override fun onDismissSucceeded() {
+                ChotPrefs.appendLog(
+                    this@ChotTrampolineActivity,
+                    "[$triggerSource] Unlocked after ${System.currentTimeMillis() - lockedAt}ms"
+                )
+                executeHandoverToClaude(triggerSource)
+            }
+
+            override fun onDismissCancelled() {
+                ChotPrefs.appendLog(this@ChotTrampolineActivity, "[$triggerSource] Unlock cancelled: not starting Claude")
+                finish()
+            }
+
+            override fun onDismissError() {
+                ChotPrefs.appendLog(this@ChotTrampolineActivity, "[$triggerSource] Unlock failed: not starting Claude")
+                finish()
+            }
+        })
     }
 
     private fun executeHandoverToClaude(triggerSource: String) {
