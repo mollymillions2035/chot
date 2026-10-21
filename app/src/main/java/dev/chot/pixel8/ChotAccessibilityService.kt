@@ -43,7 +43,7 @@ class ChotAccessibilityService : AccessibilityService() {
                 // If the Assistant / Gemini overlay is already open when mic recording starts, intercept immediately
                 handler.post {
                     if (hasActiveVoiceInteractionWindow()) {
-                        triggerIntercept("VoiceInteractionWindow+Mic")
+                        triggerIntercept("AssistantOverlayWindow+Mic")
                     }
                 }
             }
@@ -86,7 +86,7 @@ class ChotAccessibilityService : AccessibilityService() {
             return
         }
 
-        // Cheap early-out while paused; triggerIntercept enforces the pause switch for every path
+        // Cheap early-out while paused; triggerIntercept enforces the pause switch for every automatic path
         if (!ChotPrefs.isEnabled(this)) return
 
         // 2. Inspect Google App / Assistant / Gemini packages
@@ -234,9 +234,10 @@ class ChotAccessibilityService : AccessibilityService() {
                     val l = line?.trimEnd() ?: continue
                     if (!ChotPrefs.isEnabled(this@ChotAccessibilityService)) continue
 
-                    // - "onDetected" is logged by the default assistant's own hotword detector, so other on-device
-                    //   sound models (Now Playing etc.) never produce it. SoundTriggerMiddlewareLogging can't tell
-                    //   them apart, and VoiceInteractionManagerService logs nothing at INFO for a session.
+                    // - "onDetected" is logged by the default assistant's own hotword detector, so generic sound
+                    //   models (Now Playing etc.) can't produce it; Quick Phrases might, hence the overlay check.
+                    //   SoundTriggerMiddlewareLogging can't tell models apart, and VoiceInteractionManagerService
+                    //   logs nothing at INFO for a session.
                     // - The START line is Gemini's overlay activity being launched (not the full Gemini app).
                     val isDspHotword =
                         (l.startsWith("I/AlwaysOnHotwordDetector(") && l.endsWith("): onDetected")) ||
@@ -270,7 +271,14 @@ class ChotAccessibilityService : AccessibilityService() {
     }
 
     private fun pollForOverlayAfterLogcatHint() {
-        if (SystemClock.uptimeMillis() >= logcatHintDeadlineUptimeMs.get()) return
+        val deadline = logcatHintDeadlineUptimeMs.get()
+        if (deadline == 0L) return
+        if (SystemClock.uptimeMillis() >= deadline) {
+            logcatHintDeadlineUptimeMs.set(0L)
+            // Logged so the overlay matchers can be checked on the device
+            ChotPrefs.appendLog(this, "DSP-Logcat hint expired: no Assistant overlay appeared")
+            return
+        }
         if (hasActiveVoiceInteractionWindow()) {
             logcatHintDeadlineUptimeMs.set(0L)
             triggerIntercept("DSP-Logcat")

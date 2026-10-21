@@ -21,6 +21,8 @@ adb wait-for-device
 adb shell '
 CLAUDE_PKG="com.anthropic.claude"
 GOOGLE_PKG="com.google.android.googlequicksearchbox"
+# Focused window while the "Hey Google" overlay is up: Gemini FloatyActivity, or classic Assistant VoiceInteractionSession
+OVERLAY_FOCUS_RE="mCurrentFocus=Window\{[^ ]+ u[0-9]+ ($GOOGLE_PKG/com\.google\.android\.apps\.search\.assistant\.surfaces\.voice\.robin\.ui\.floaty\.activity\.FloatyActivity|VoiceInteractionSession)\}"
 
 # Discover Claude ASSIST or Main activity dynamically on device
 ASSIST_COMP=$(cmd package query-activities --brief -a android.intent.action.VOICE_ASSIST "$CLAUDE_PKG" 2>/dev/null | tail -n 1 | tr -d " \r")
@@ -35,8 +37,9 @@ echo "[chot-daemon] Listening for Pixel 8 Tensor G3 DSP hotword events..."
 
 LAST_TRIGGER=0
 logcat -c
-# "onDetected" comes from the hotword detector of the default assistant itself, so other on-device sound models
-# (Now Playing etc.) never produce it, unlike SoundTriggerMiddlewareLogging recognitions
+# "onDetected" comes from the hotword detector of the default assistant itself, so generic sound models such as
+# Now Playing never produce it, unlike SoundTriggerMiddlewareLogging recognitions. It is still only a hint (Quick
+# Phrases may share the detector), so nothing happens unless the overlay shows up.
 logcat -v brief AlwaysOnHotwordDetector:I ActivityTaskManager:I *:S | while IFS= read -r line; do
     case "$line" in
         "I/AlwaysOnHotwordDetector("*"): onDetected"|*"VoicePlateActivity"*|*"RobinVoicePlateActivity"*)
@@ -45,6 +48,23 @@ logcat -v brief AlwaysOnHotwordDetector:I ActivityTaskManager:I *:S | while IFS=
                 continue
             fi
             LAST_TRIGGER=$NOW
+
+            # The hint is logged before the overlay exists, and BACK right away would land in the app the user
+            # is in. Wait up to a couple of seconds for the overlay to have focus.
+            OVERLAY_UP=0
+            i=0
+            while [ $i -lt 15 ]; do
+                if dumpsys window displays 2>/dev/null | grep -qE "$OVERLAY_FOCUS_RE"; then
+                    OVERLAY_UP=1
+                    break
+                fi
+                sleep 0.1
+                i=$((i + 1))
+            done
+            if [ "$OVERLAY_UP" != 1 ]; then
+                echo "[chot-daemon] Hotword hint, but no Assistant overlay took focus. Ignoring."
+                continue
+            fi
             echo "[chot-daemon] Hotword detected! Dismissing Google Assistant & freeing mic..."
 
             # 1. Dismiss Google Assistant overlay & force-release microphone
