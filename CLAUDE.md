@@ -64,6 +64,7 @@ Issues 1–5 (intercepting things the user didn't ask for), 7 and 9 were fixed o
     - Timing: laying out the widget took 24–33ms. chot saw Claude's window 180–224ms after the press when warm and 269ms when cold, and voice mode at the same moment when warm and at 505ms when cold. The capture had Claude drawn 0.64–0.96s after the hotword (typically 0.66s; 1.06s cold).
     - Every press logs `W/RemoteViews: getLaunchOptions: view.getDisplay() is null!` because chot's copy isn't attached to a window. It's harmless.
     - Since then, the post-press poll runs from a handler of its own and uses whichever service instance is connected when it fires, a newer launch stops the older poll, a destroyed instance only clears `instance` if it's still the current one, and the check logs exceptions instead of crashing. No bug had shown up there; it was a misread log (see the testing tip on chot's log).
+  - **Re-checked on the Pixel 8 (`6f4c35b`):** the widget binding survived the app update (same id, no prompt). The Test button, 2 "Hey Google" and 1 long-press power all reached voice mode through the widget, with voice mode seen 181–242ms after the press and no fallback or error lines. The `active and listening` line lands 60–340ms after the moment its elapsed time was measured, probably because the check walks Claude's node tree in between; that doesn't delay voice mode, which Claude starts by itself.
 
 Checked on the owner's Pixel 8 (Android 17, Google app 17.66.20) on 2026-10-21:
 - "Hey Google" from Settings opened Claude in voice mode 3 times out of 3, with no stray BACK (Settings stayed on the same screen).
@@ -72,6 +73,7 @@ Checked on the owner's Pixel 8 (Android 17, Google app 17.66.20) on 2026-10-21:
 - Re-checked after the fix for 7 (`a568a5a`): chot caught 6 "Hey Google"s out of 6, all through the accessibility path (`AssistantActivity (FloatyActivity)` or `AssistantOverlayWindow`). Of the 3 tries watched closely, 2 entered voice mode and left Settings where it was; the third didn't enter voice mode (see 13).
 - Re-checked after the fixes for 12 and 13 (`7553bff`): 12 triggers and 12 intercepts, with no extra ones. Of the 11 tries the owner ran from Settings, 10 entered voice mode and left Settings where it was; the other hit 15.
 - Re-checked with the widget launch (`4c1ca20`): 8 triggers, 8 intercepts, 8 voice modes through the widget, including with a draft, after a Code session and from a cold start. Settings stayed on the same screen.
+- Re-checked on `6f4c35b`: 3 triggers and the Test button, 4 voice modes through the widget. Settings stayed on the same screen.
 
 ## Claude updates
 chot reads Claude's screen: labels such as "Voice Mode", where the button sits, and the activities Claude starts. A Claude update can change any of them, so some breakage is expected (owner, 2026-10-21).
