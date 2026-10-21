@@ -67,6 +67,14 @@ Checked on the owner's Pixel 8 (Android 17, Google app 17.66.20) on 2026-10-21:
 - Re-checked after the fix for 7 (`a568a5a`): chot caught 6 "Hey Google"s out of 6, all through the accessibility path (`AssistantActivity (FloatyActivity)` or `AssistantOverlayWindow`). Of the 3 tries watched closely, 2 entered voice mode and left Settings where it was; the third didn't enter voice mode (see 13).
 - Re-checked after the fixes for 12 and 13 (`7553bff`): 12 triggers and 12 intercepts, with no extra ones. Of the 11 tries the owner ran from Settings, 10 entered voice mode and left Settings where it was; the other hit 15.
 
+## Claude updates
+chot reads Claude's screen: labels such as "Voice Mode", where the button sits, and the activities Claude starts. A Claude update can change any of them, so some breakage is expected (owner, 2026-10-21).
+- When chot isn't sure, it does nothing and logs why, rather than tapping a guess. The coordinate fallback only taps an unlabeled spot or the Voice button. The owner chose to keep it that strict, even though a renamed Voice button then needs a code change.
+- The labels chot matches are lists at the end of `ChotAccessibilityService.kt`, so most breakages should be a one-line change there.
+- Keep looking for sturdier ways in, and weigh them when they come up:
+  - A launch from Claude that opens voice mode directly, such as an intent, deep link or app shortcut, would skip reading the screen entirely.
+  - Recognizing the Voice button by how it looks, from `AccessibilityService.takeScreenshot` (API 30+), once an image model small and fast enough to run inside chot exists. Not planned yet.
+
 ## What the Pixel 8 does (Android 17, Google app 17.66.20)
 For future matching work:
 - **"Hey Google":** logs `I/SoundTriggerMiddlewareLogging: RECOGNITION (<handle>, PhraseRecognitionEventSys{… type: 0 … PhraseRecognitionExtra{id: 101 …`, then `I/AlwaysOnHotwordDetector: onDetected`, then `D/VoiceInteractionManager: Self-trigger check: VIS triggering from recent hotword`.
