@@ -336,7 +336,7 @@ class MainActivity : Activity() {
         val assistantMsg = if (isGoogleDefault) {
             "Google is Default Assistant → Pixel 8 Tensor G3 \"Hey Google\" DSP is ACTIVE"
         } else {
-            "WARNING: Default Assistant is '$voiceInteractionService'. Set Default Assistant back to Google so Pixel 8 hardware \"Hey Google\" DSP stays active!"
+            "WARNING: Default Assistant is '$voiceInteractionService'. Set it back to Google (Gemini) in Settings > Apps > Default apps > Digital assistant app so Pixel 8 hardware \"Hey Google\" DSP stays active!"
         }
         statusContainer.addView(statusRow("Pixel 8 Hardware DSP (\"Hey Google\")", isGoogleDefault, assistantMsg))
 

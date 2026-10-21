@@ -31,11 +31,12 @@ On stock Android (Pixel 8 `user` builds):
 ## Quick Start (One-Command Build + Auto-Setup over ADB)
 
 1. Make sure the official **Claude** app (`com.anthropic.claude`) is installed on your Pixel 8 and **USB Debugging** (or Wireless Debugging) is enabled.
+   Google (Gemini) must be your **default digital assistant** (Settings → Apps → Default apps → Digital assistant app). Chot needs Google's hotword detection running, and it doesn't change this setting for you.
 2. Build the signed APK (automatically downloads portable JDK 17, Android SDK 34, and Gradle 8.7 into `.toolchain/` if not installed on your machine):
    ```bash
    ./scripts/build-apk.sh
    ```
-3. Plug in your Pixel 8 and run the automated setup script (installs `chot-pixel8.apk`, grants `WRITE_SECURE_SETTINGS` and `SYSTEM_ALERT_WINDOW`, ensures Google's hardware DSP hotword service is active, and enables `ChotAccessibilityService` automatically):
+3. Plug in your Pixel 8 and run the automated setup script (installs `chot-pixel8.apk`, grants `WRITE_SECURE_SETTINGS` and `SYSTEM_ALERT_WINDOW`, checks that Google is still the default assistant, and enables `ChotAccessibilityService` automatically):
    ```bash
    ./scripts/pixel8-adb-setup.sh
    ```

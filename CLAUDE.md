@@ -4,7 +4,7 @@ Hardware DSP hotword bridge: intercepts "Hey Google" on a stock Pixel 8 and hand
 
 ## Known issues (ultrareview, 2026-10-20)
 
-Open: 6 and 8–14, all rated normal severity. 13 has already cost one voice-mode switch on the phone. Fixed issues keep their numbers and are listed separately below.
+Open: 6, 8 and 10–14, all rated normal severity. 13 has already cost one voice-mode switch on the phone. Fixed issues keep their numbers and are listed separately below.
 
 ### Setup and edge cases
 - **6. Locked phone drops the request.** `requestDismissKeyguard(this, null)` doesn't wait for the unlock, so Claude launches behind the keyguard and the auto-tap times out. Launch from `onDismissSucceeded`. `ChotTrampolineActivity.kt:36`.
@@ -13,9 +13,6 @@ Open: 6 and 8–14, all rated normal severity. 13 has already cost one voice-mod
   - `pixel8-instant-adb-daemon.sh:78-88` taps 0.75s after every trigger without checking that `am start` worked or that Claude has focus.
   - It taps (955, 2195), not the APK's default (955, 2234) from `ChotPrefs.kt:73`. On the Pixel 8 the settled Voice button was at [907,2164][1033,2290] and [932,2164][1058,2290], so both points currently land on it. The risk is the button moving (its x shifted 25px between intercepts), not the y value.
   - `MainActivity.kt:245-246` falls back to 88.5%/91.5% where the default is 88.4%/93.1%.
-- **9. Assistant settings don't match.** `pixel8-adb-setup.sh:65-68` sets `assistant` to `OpaActivity` and `voice_interaction_service` to `GsaVoiceInteractionService`. It never changes the ASSISTANT role, so a role sync can revert both settings. The suggested fix is `cmd role add-role-holder android.app.role.ASSISTANT com.google.android.googlequicksearchbox`.
-  - **Seen on the Pixel 8 (2026-10-21):** `assistant` is set to `…/com.google.android.voiceinteraction.GsaVoiceInteractionService`, the same component as `voice_interaction_service`, not `OpaActivity`. The script's restore branch would write a different value from the one the phone uses.
-  - **Observed on device:** long-pressing the power button currently opens a Claude voice chat successfully. The owner hasn't decided whether that's desirable, so confirm with them before "fixing" this.
 - **10. The daemon force-stops the Google app on every trigger.** `am force-stop com.google.android.googlequicksearchbox` tears down the VoiceInteractionService and hotword detector the bridge depends on, so the next "Hey Google" may not be detected. It also cancels Google's alarms and jobs. Drop it and rely on BACK, as the APK does. `pixel8-instant-adb-daemon.sh:72`.
 - **11. The daemon's ASSIST fallback never runs.** `tr -d " \r"` strips the spaces from "No activities found" before the `*"No activities"*` check, so that check can't match. Without a VOICE_ASSIST activity, the daemon opens Claude's main activity instead of the assistant overlay. Compare before stripping, or check for `/`. `pixel8-instant-adb-daemon.sh:28-29`.
 
@@ -36,7 +33,7 @@ Open: 6 and 8–14, all rated normal severity. 13 has already cost one voice-mod
   - Needs a launch that always lands on a chat, or a fallback that only taps when Claude's chat screen is showing. `ClaudeLauncher.kt:84`, `ChotAccessibilityService.kt:311`.
 
 ### Fixed
-Issues 1–5 (intercepting things the user didn't ask for) and 7 were fixed on 2026-10-21. On the Pixel 8 the fixes for 1, 2, 5 and 7 held. The fix for 7 removed the APK's logcat fast path, so 3 and 4 now only concern the daemon, which wasn't run on the phone, though the capture confirmed the log lines it keys on.
+Issues 1–5 (intercepting things the user didn't ask for), 7 and 9 were fixed on 2026-10-21. On the Pixel 8 the fixes for 1, 2, 5 and 7 held; 9's new setup step hasn't been run on the phone yet. The fix for 7 removed the APK's logcat fast path, so 3 and 4 now only concern the daemon, which wasn't run on the phone, though the capture confirmed the log lines it keys on.
 
 - **1. Opening the Gemini app by hand gets intercepted.** Fixed. The overlay checks now match only the overlay: Gemini's `…robin.ui.floaty.activity.FloatyActivity` (by class, or its `assistant_robin_floaty_root_container` root view), or classic Assistant's `VoiceInteractionSession` window, which accessibility reports as window type -1 (never `TYPE_SYSTEM`). The full Gemini app is `…robin.main.MainActivity` in the Google app, which the old `com.google.android.apps.search.assistant` token and `:id/assistant_` view ids also matched; both are gone, along with the bard package token and the "Gemini" title match. The older class-name tokens (`VoicePlate`, `RobinVoicePlate`, `RobinActivity`, `AssistantActivity`, `OpaActivity`, `ZeroState`, `LockscreenEntry`) are still there. Not all of them are classic-Assistant names: "Robin" is Gemini's codename. On the Pixel 8 none of them matched any Google activity seen. Anything else they might match is unverified.
 - **2. Manual Google voice search gets intercepted.** Fixed. Window-state events from `NORMAL_SEARCH_CLASSES` are excluded before any overlay check. What actually caught voice search was the "Listening…" text heuristic, which content events and the mic path reached without that exclusion; it is gone, along with "Ask Gemini", which matched the Gemini app.
@@ -49,6 +46,9 @@ Issues 1–5 (intercepting things the user didn't ask for) and 7 were fixed on 2
   - Making it work would have meant an Allow tap after every reboot, app update or accessibility rebind. The gain was at most one poll interval: since the fix for 4, a hint only polled for the overlay that the accessibility path already reacts to.
   - **Seen on the Pixel 8 (Android 17):** the setup script opens Chot, so the consent dialog (`LogAccessDialogActivity`) did appear right after install. It was destroyed when the screen went to sleep, apparently unanswered. Chot then logged no `DSP-Logcat` intercept or expired hint for the 3 hotwords said while it was on.
   - **Re-checked on the Pixel 8 (`a568a5a`):** `READ_LOGS` is gone from `dumpsys package`, no `LogAccessDialogActivity` appeared after install, and the status screen has no logcat row.
+- **9. Assistant settings don't match.** Fixed by no longer changing them. When Google wasn't the default assistant, step 4 of `pixel8-adb-setup.sh` wrote `voice_interaction_service` and `assistant` itself. It set `assistant` to `OpaActivity`, where Android writes `GsaVoiceInteractionService`, and it left the ASSISTANT role alone, so a role sync could revert both. The step now only checks and warns, like Chot's status screen, and the README lists Google (Gemini) as the default digital assistant as a setup requirement.
+  - **Seen on the Pixel 8 (2026-10-21):** `assistant` is set to `…/com.google.android.voiceinteraction.GsaVoiceInteractionService`, the same component as `voice_interaction_service`.
+  - **Owner's decision (2026-10-21):** long-pressing the power button should open a Claude voice chat, as it does now. Don't "fix" that. It most likely works because Google is the default assistant: the long press opens Gemini's overlay, which Chot intercepts as it does for "Hey Google". No capture has confirmed that yet.
 
 Checked on the owner's Pixel 8 (Android 17, Google app 17.66.20) on 2026-10-21:
 - "Hey Google" from Settings opened Claude in voice mode 3 times out of 3, with no stray BACK (Settings stayed on the same screen).
