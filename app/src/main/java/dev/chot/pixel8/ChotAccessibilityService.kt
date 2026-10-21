@@ -110,16 +110,14 @@ class ChotAccessibilityService : AccessibilityService() {
      *   AccessibilityWindowInfo has no constant for and reports as type -1 (not TYPE_SYSTEM).
      * - Gemini draws into FloatyActivity, a transparent activity window, identified by its overlay root view.
      */
-    private fun hasActiveVoiceInteractionWindow(): Boolean = findVoiceInteractionWindow() != null
-
-    private fun findVoiceInteractionWindow(): AccessibilityWindowInfo? {
+    private fun hasActiveVoiceInteractionWindow(): Boolean {
         return try {
-            windows?.firstOrNull { win ->
+            windows?.any { win ->
                 // Only these two window types can be the overlay; skip the root IPC for status bar, IME etc.
                 if (win.type != VOICE_INTERACTION_WINDOW_TYPE && win.type != AccessibilityWindowInfo.TYPE_APPLICATION) {
-                    return@firstOrNull false
+                    return@any false
                 }
-                val root = win.root ?: return@firstOrNull false
+                val root = win.root ?: return@any false
                 val pkg = root.packageName?.toString() ?: ""
                 if (pkg in GOOGLE_ASSISTANT_PACKAGES) {
                     win.type == VOICE_INTERACTION_WINDOW_TYPE ||
@@ -127,9 +125,9 @@ class ChotAccessibilityService : AccessibilityService() {
                 } else {
                     false
                 }
-            }
+            } == true
         } catch (_: Exception) {
-            null
+            false
         }
     }
 
@@ -139,32 +137,14 @@ class ChotAccessibilityService : AccessibilityService() {
      * logged with the window that had focus when it was sent. Only the window is looked up first; describing it
      * means a round trip to its app, so that waits until the BACK is on its way.
      */
-    private fun sendBack(label: String) {
+    private fun sendBack() {
         val focused = findFocusedWindow()
         val ok = try {
             performGlobalAction(GLOBAL_ACTION_BACK)
         } catch (_: Exception) {
             false
         }
-        ChotPrefs.appendLog(this, "$label sent (focus: ${describeWindow(focused)}) -> $ok")
-    }
-
-    /**
-     * Re-sends BACK only while the overlay still has input focus, so the BACK goes to the overlay and nowhere else,
-     * and only before Claude is launched: a BACK still in flight when Claude's window takes focus closes Claude.
-     */
-    private fun sendFollowUpBackIfOverlayFocused(interceptEpochMs: Long) {
-        val overlay = findVoiceInteractionWindow() ?: return
-        val delay = "${FOLLOW_UP_BACK_DELAY_MS}ms"
-        when {
-            lastClaudeLaunchEpochMs.get() >= interceptEpochMs ->
-                ChotPrefs.appendLog(this, "Overlay still on screen at $delay, Claude already launched: no follow-up BACK")
-            overlay.isFocused -> sendBack("Follow-up BACK")
-            else -> ChotPrefs.appendLog(
-                this,
-                "Overlay still on screen at $delay but not focused (focus: ${describeFocusedWindow()}): no follow-up BACK"
-            )
-        }
+        ChotPrefs.appendLog(this, "BACK sent (focus: ${describeWindow(focused)}) -> $ok")
     }
 
     private fun findFocusedWindow(): AccessibilityWindowInfo? {
@@ -192,7 +172,7 @@ class ChotAccessibilityService : AccessibilityService() {
      * 2. Immediately dismisses Google's Assistant / Gemini overlay via GLOBAL_ACTION_BACK. Automatic callers
      *    must only get here once the overlay is confirmed on screen, otherwise BACK lands in the user's app.
      * 3. Starts ChotTrampolineActivity to steal exclusive transient audio focus, verify mic release,
-     *    wake the lock screen if needed, and launch Claude into Voice Mode.
+     *    wait for the owner to unlock if the phone is locked, and launch Claude into Voice Mode.
      *
      * [manual] is set by MainActivity's Test button: it runs even while paused, skips the cooldown, and sends
      * no BACK because there is no overlay to dismiss.
@@ -210,12 +190,9 @@ class ChotAccessibilityService : AccessibilityService() {
         lastInterceptEpochMs.set(now)
 
         if (!manual) {
-            // Step 1: Dismiss Google Assistant / Gemini overlay immediately
-            sendBack("BACK")
-
-            // Follow-up check: if the first BACK didn't dismiss the overlay, dismiss again, but only where it can't
-            // reach anything else
-            handler.postDelayed({ sendFollowUpBackIfOverlayFocused(now) }, FOLLOW_UP_BACK_DELAY_MS)
+            // Step 1: Dismiss Google Assistant / Gemini overlay immediately. A second BACK used to follow if the
+            // overlay lingered; it never went out in 23 phone intercepts, and a late one can close Claude.
+            sendBack()
         }
 
         // Step 2: Launch transparent trampoline to force audio focus handover and launch Claude
@@ -624,7 +601,6 @@ class ChotAccessibilityService : AccessibilityService() {
             private set
 
         private val claudeAutoTapArmedEpochMs = AtomicLong(0L)
-        private val lastClaudeLaunchEpochMs = AtomicLong(0L)
         private val coordinateFallbackScheduled = AtomicBoolean(false)
         private val diagnosticTreeDumped = AtomicBoolean(false)
         private val offScreenRetryLogged = AtomicBoolean(false)
@@ -637,8 +613,6 @@ class ChotAccessibilityService : AccessibilityService() {
         private val pollGeneration = AtomicInteger(0)
         private val pollHandler = Handler(Looper.getMainLooper())
 
-        private const val FOLLOW_UP_BACK_DELAY_MS = 300L
-
         // After a press on Claude's widget: how long Claude gets to open before chot launches it directly, and how
         // long its window gets to enter voice mode before chot looks for the Voice button. On the Pixel 8 chot saw
         // Claude's window 180-224ms after the press when warm and 269ms when cold, and voice mode at the same moment
@@ -646,7 +620,7 @@ class ChotAccessibilityService : AccessibilityService() {
         private const val WIDGET_OPEN_TIMEOUT_MS = 1000L
         private const val WIDGET_TAP_GRACE_MS = 700L
 
-        /** Called right after every Claude launch, so it also records the launch time for the follow-up BACK. */
+        /** Called right after every Claude launch. */
         fun armClaudeVoiceAutoTap(context: Context) = arm(context, viaWidget = false)
 
         /** Called right after pressing the Voice chat button on chot's copy of Claude's widget. */
@@ -661,9 +635,7 @@ class ChotAccessibilityService : AccessibilityService() {
             autoTapErrorLogged.set(false)
             noServiceLogged.set(false)
             launchedViaWidget.set(viaWidget)
-            val now = System.currentTimeMillis()
-            lastClaudeLaunchEpochMs.set(now)
-            claudeAutoTapArmedEpochMs.set(now)
+            claudeAutoTapArmedEpochMs.set(System.currentTimeMillis())
             schedulePoll(context.applicationContext, pollGeneration.incrementAndGet(), 100L)
         }
 
