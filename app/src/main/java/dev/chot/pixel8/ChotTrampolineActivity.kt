@@ -11,6 +11,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.os.SystemClock
 import android.view.View
 import android.view.WindowManager
 
@@ -42,26 +44,64 @@ class ChotTrampolineActivity : Activity() {
         // Claude can't show over the lock screen, so launching it now would leave it behind the keyguard, where it
         // never shows up after the unlock. Ask to unlock and hand over only once that succeeds.
         ChotPrefs.appendLog(this, "[$triggerSource] Phone is locked: waiting for the unlock")
-        val lockedAt = System.currentTimeMillis()
-        keyguardManager.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
-            override fun onDismissSucceeded() {
-                ChotPrefs.appendLog(
-                    this@ChotTrampolineActivity,
-                    "[$triggerSource] Unlocked after ${System.currentTimeMillis() - lockedAt}ms"
-                )
-                executeHandoverToClaude(triggerSource)
+        requestUnlockOnceAwake(keyguardManager, triggerSource, System.currentTimeMillis())
+    }
+
+    /**
+     * Asks to unlock once the screen has been on for [UNLOCK_PROMPT_SETTLE_MS]. Asked while the phone is still waking
+     * from screen-off, the Pixel 8 offered only the PIN pad, without the fingerprint. If the owner unlocks from the
+     * lock screen meanwhile, the handover starts right away.
+     */
+    private fun requestUnlockOnceAwake(keyguardManager: KeyguardManager, triggerSource: String, lockedAt: Long) {
+        val power = getSystemService(PowerManager::class.java)
+        val waitStart = SystemClock.elapsedRealtime()
+        // Screen already on: count from when it came on (0, so no wait, if chot hasn't seen that). Screen off: count
+        // from when this check first sees it on, which can't be early even if the broadcast arrives late
+        var screenOnAt = if (power.isInteractive) ChotAccessibilityService.lastScreenOnElapsedMs else -1L
+
+        fun check() {
+            if (isFinishing || isDestroyed) return
+            if (!keyguardManager.isKeyguardLocked) {
+                onUnlocked(triggerSource, lockedAt)
+                return
+            }
+            val now = SystemClock.elapsedRealtime()
+            if (screenOnAt < 0 && power.isInteractive) {
+                screenOnAt = now
+            }
+            val screenOnMs = if (screenOnAt < 0) -1L else now - screenOnAt
+            if (screenOnMs < UNLOCK_PROMPT_SETTLE_MS && now - waitStart < UNLOCK_PROMPT_MAX_WAIT_MS) {
+                handler.postDelayed({ check() }, 50L)
+                return
             }
 
-            override fun onDismissCancelled() {
-                ChotPrefs.appendLog(this@ChotTrampolineActivity, "[$triggerSource] Unlock cancelled: not starting Claude")
-                finish()
-            }
+            val screenOn = if (screenOnMs > 60_000L) "for a while" else "for ${screenOnMs}ms"
+            ChotPrefs.appendLog(this, "[$triggerSource] Asking to unlock (screen on $screenOn)")
+            keyguardManager.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
+                override fun onDismissSucceeded() {
+                    onUnlocked(triggerSource, lockedAt)
+                }
 
-            override fun onDismissError() {
-                ChotPrefs.appendLog(this@ChotTrampolineActivity, "[$triggerSource] Unlock failed: not starting Claude")
-                finish()
-            }
-        })
+                override fun onDismissCancelled() {
+                    ChotPrefs.appendLog(
+                        this@ChotTrampolineActivity,
+                        "[$triggerSource] Unlock cancelled: not starting Claude"
+                    )
+                    finish()
+                }
+
+                override fun onDismissError() {
+                    ChotPrefs.appendLog(this@ChotTrampolineActivity, "[$triggerSource] Unlock failed: not starting Claude")
+                    finish()
+                }
+            })
+        }
+        check()
+    }
+
+    private fun onUnlocked(triggerSource: String, lockedAt: Long) {
+        ChotPrefs.appendLog(this, "[$triggerSource] Unlocked after ${System.currentTimeMillis() - lockedAt}ms")
+        executeHandoverToClaude(triggerSource)
     }
 
     private fun executeHandoverToClaude(triggerSource: String) {
@@ -154,5 +194,10 @@ class ChotTrampolineActivity : Activity() {
 
     companion object {
         const val EXTRA_TRIGGER_SOURCE = "extra_trigger_source"
+
+        // How long the screen has to have been on before chot asks to unlock, so the prompt offers the fingerprint,
+        // and the longest chot waits for that
+        private const val UNLOCK_PROMPT_SETTLE_MS = 800L
+        private const val UNLOCK_PROMPT_MAX_WAIT_MS = 3000L
     }
 }
