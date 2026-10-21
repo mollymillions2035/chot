@@ -1,5 +1,25 @@
 # chot (`dev.chot.pixel8`) — Hardware DSP Hotword Bridge for Claude on Stock Pixel 8
 
+<p align="center">
+  <i>Very silly and almost definitely very insecure</i>
+  <br>
+  <b>BUT</b>
+  <br>
+  <img alt="EXTREMELY BATTERY EFFICIENT" src="https://img.shields.io/badge/EXTREMELY-BATTERY_EFFICIENT-2ea44f?style=for-the-badge">
+  <br>
+  <i>and more importantly</i>
+  <br>
+  <img alt="ROOTLESS" src="https://img.shields.io/badge/ROOTLESS-8957e5?style=for-the-badge">
+  <br>
+  <i>implementation of hotword activation of Claude in voice conversation mode on a Pixel 8.</i>
+</p>
+
+<p align="center">
+  <img alt="DOES NOT REQUIRE MODIFYING CLAUDE'S APP IN ANY WAY" src="https://img.shields.io/badge/DOES_NOT_REQUIRE-MODIFYING_CLAUDE%27S_APP_IN_ANY_WAY-D97757?style=for-the-badge">
+</p>
+
+<p align="center"><sub>Likely to not work on any phone but mine, but feel free to try.</sub></p>
+
 Makes **"Hey Google"** launch **Claude Voice Mode / Assistant Overlay** (`com.anthropic.claude`) hands-free on an **unrooted, stock Pixel 8** while retaining the Tensor G3's zero-battery hardware audio DSP.
 
 ---
