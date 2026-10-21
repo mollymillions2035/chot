@@ -11,8 +11,10 @@ import android.media.AudioManager
 import android.media.AudioRecordingConfiguration
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.concurrent.atomic.AtomicBoolean
@@ -24,8 +26,9 @@ class ChotAccessibilityService : AccessibilityService() {
     private val lastInterceptEpochMs = AtomicLong(0L)
     private val isMicRecordingActive = AtomicBoolean(false)
 
-    // Until when a logcat hotword hint keeps polling for the Assistant overlay (0 = not polling)
-    private val logcatHintDeadlineEpochMs = AtomicLong(0L)
+    // Until when (uptime) a logcat hotword hint keeps polling for the Assistant overlay (0 = not polling)
+    private val logcatHintDeadlineUptimeMs = AtomicLong(0L)
+    private val logcatHintPoll = Runnable { pollForOverlayAfterLogcatHint() }
 
     @Volatile
     private var logcatThread: Thread? = null
@@ -91,7 +94,9 @@ class ChotAccessibilityService : AccessibilityService() {
             val className = event.className?.toString() ?: ""
 
             // Never hijack normal Google Search or Launcher activities (including the search-bar mic's voice search).
-            // This runs before any overlay check.
+            // Only window-state events carry the activity class; content events and the mic path stay safe because
+            // hasActiveVoiceInteractionWindow() accepts nothing but the overlay itself (no text or generic view-id
+            // heuristics, which is what used to match voice search).
             if (NORMAL_SEARCH_CLASSES.any { className.contains(it, ignoreCase = true) }) {
                 return
             }
@@ -120,6 +125,10 @@ class ChotAccessibilityService : AccessibilityService() {
     private fun hasActiveVoiceInteractionWindow(): Boolean {
         return try {
             windows?.any { win ->
+                // Only these two window types can be the overlay; skip the root IPC for status bar, IME etc.
+                if (win.type != VOICE_INTERACTION_WINDOW_TYPE && win.type != AccessibilityWindowInfo.TYPE_APPLICATION) {
+                    return@any false
+                }
                 val root = win.root ?: return@any false
                 val pkg = root.packageName?.toString() ?: ""
                 if (pkg in GOOGLE_ASSISTANT_PACKAGES) {
@@ -156,7 +165,7 @@ class ChotAccessibilityService : AccessibilityService() {
             return
         }
         lastInterceptEpochMs.set(now)
-        logcatHintDeadlineEpochMs.set(0L)
+        logcatHintDeadlineUptimeMs.set(0L)
 
         if (!manual) {
             // Step 1: Dismiss Google Assistant / Gemini overlay immediately
@@ -254,25 +263,24 @@ class ChotAccessibilityService : AccessibilityService() {
      * hotword, or an intercept that already happened) expire on their own.
      */
     private fun onLogcatHotwordHint() {
-        val now = System.currentTimeMillis()
-        val alreadyPolling = now < logcatHintDeadlineEpochMs.get()
-        logcatHintDeadlineEpochMs.set(now + LOGCAT_HINT_CONFIRM_WINDOW_MS)
-        if (!alreadyPolling) {
-            pollForOverlayAfterLogcatHint()
-        }
+        logcatHintDeadlineUptimeMs.set(SystemClock.uptimeMillis() + LOGCAT_HINT_CONFIRM_WINDOW_MS)
+        // Restart rather than stack polls when hints arrive back to back (onDetected, then the START line)
+        handler.removeCallbacks(logcatHintPoll)
+        handler.post(logcatHintPoll)
     }
 
     private fun pollForOverlayAfterLogcatHint() {
-        if (System.currentTimeMillis() >= logcatHintDeadlineEpochMs.get()) return
+        if (SystemClock.uptimeMillis() >= logcatHintDeadlineUptimeMs.get()) return
         if (hasActiveVoiceInteractionWindow()) {
-            logcatHintDeadlineEpochMs.set(0L)
+            logcatHintDeadlineUptimeMs.set(0L)
             triggerIntercept("DSP-Logcat")
             return
         }
-        handler.postDelayed({ pollForOverlayAfterLogcatHint() }, LOGCAT_HINT_POLL_MS)
+        handler.postDelayed(logcatHintPoll, LOGCAT_HINT_POLL_MS)
     }
 
     private fun stopLogcatDspWatcher() {
+        handler.removeCallbacks(logcatHintPoll)
         try {
             logcatProcess?.destroy()
             logcatThread?.interrupt()
