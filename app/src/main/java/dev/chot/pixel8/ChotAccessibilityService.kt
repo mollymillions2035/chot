@@ -335,8 +335,10 @@ class ChotAccessibilityService : AccessibilityService() {
         if (elapsed >= 1600L && ChotPrefs.isCoordinateFallbackEnabled(this) &&
             !coordinateFallbackScheduled.getAndSet(true)
         ) {
-            claudeAutoTapArmedEpochMs.set(0L)
-            dispatchCoordinateTap(roots)
+            // A skipped tap leaves the auto-tap armed: the Voice button can still show up before the 6s limit
+            if (dispatchCoordinateTap(roots)) {
+                claudeAutoTapArmedEpochMs.set(0L)
+            }
         }
     }
 
@@ -403,12 +405,13 @@ class ChotAccessibilityService : AccessibilityService() {
 
     private fun collectNodeSummary(node: AccessibilityNodeInfo, depth: Int, out: MutableList<String>) {
         if (depth > 40 || out.size >= 25) return
-        val rawText = node.text?.toString()?.trim().orEmpty()
-        // A text box's text is the owner's draft: log only that there is one, not what it says
+        val rawText = node.text?.toString().orEmpty()
+        // A text box's text is the owner's draft: log only that there is one, not what it says. Untrimmed, so a
+        // draft of only spaces or newlines shows up too.
         val t = if (node.isEditable && rawText.isNotEmpty() && !node.isShowingHintText) {
             "<draft, ${rawText.length} chars>"
         } else {
-            rawText
+            rawText.trim()
         }
         val d = node.contentDescription?.toString()?.trim().orEmpty()
         val id = node.viewIdResourceName?.substringAfterLast('/')?.trim().orEmpty()
@@ -501,8 +504,9 @@ class ChotAccessibilityService : AccessibilityService() {
     /**
      * Taps the configured spot, but only where it can't hit anything other than an unlabeled Voice button: with a
      * draft in Claude's text box, Send sits exactly there, and in a Claude Code session it can be Stop.
+     * Returns false if it skipped the tap.
      */
-    private fun dispatchCoordinateTap(claudeRoots: List<AccessibilityNodeInfo>) {
+    private fun dispatchCoordinateTap(claudeRoots: List<AccessibilityNodeInfo>): Boolean {
         val dm = resources.displayMetrics
         val x = dm.widthPixels * ChotPrefs.getTapXPercent(this)
         val y = dm.heightPixels * ChotPrefs.getTapYPercent(this)
@@ -510,17 +514,18 @@ class ChotAccessibilityService : AccessibilityService() {
 
         if (isKeyboardAt(x.toInt(), y.toInt())) {
             ChotPrefs.appendLog(this, "Coordinate fallback skipped: the keyboard covers $point")
-            return
+            return false
         }
         val target = claudeRoots.firstNotNullOfOrNull { findClickableAt(it, x.toInt(), y.toInt()) }
         val label = target?.let { describeLabel(it) }.orEmpty()
         if (target != null && label.isNotEmpty() && findClaudeVoiceModeButton(target) == null) {
             ChotPrefs.appendLog(this, "Coordinate fallback skipped: $point is on '$label'")
-            return
+            return false
         }
 
         val ok = dispatchTapGesture(x, y)
         ChotPrefs.appendLog(this, "Coordinate fallback tap at $point -> $ok")
+        return true
     }
 
     private fun isKeyboardAt(x: Int, y: Int): Boolean {
