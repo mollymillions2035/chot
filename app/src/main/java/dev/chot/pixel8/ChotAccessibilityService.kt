@@ -15,6 +15,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 class ChotAccessibilityService : AccessibilityService() {
@@ -47,7 +48,10 @@ class ChotAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
-        instance = null
+        // Only clear it if it's still this instance, so a late onDestroy can't clear a newer one
+        if (instance === this) {
+            instance = null
+        }
         try {
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             audioManager.unregisterAudioRecordingCallback(audioRecordingCallback)
@@ -66,7 +70,7 @@ class ChotAccessibilityService : AccessibilityService() {
 
         // 1. Handle Claude window events when Voice Mode Auto-Tap is armed
         if (pkg == ClaudeLauncher.CLAUDE_PACKAGE) {
-            handleClaudeWindowEvent()
+            checkClaudeWindow()
             return
         }
 
@@ -228,25 +232,25 @@ class ChotAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             ChotPrefs.appendLog(this, "Trampoline error: ${e.message}, launching Claude directly")
             ClaudeLauncher.launchClaude(this, ChotPrefs.getLaunchMode(this))
-            armClaudeVoiceAutoTap()
+            armClaudeVoiceAutoTap(this)
         }
     }
 
     /**
-     * When Claude opens after a hotword intercept, ensures Claude enters active Voice Mode:
-     * - Actively polls every 120ms (in addition to window events) so Compose UI updates are caught immediately.
+     * When Claude opens after a hotword intercept, ensures Claude enters active Voice Mode. Runs on Claude's window
+     * events and on the 120ms poll (`schedulePoll`):
      * - Searches Claude's full accessibility node tree (up to depth 40) for the Voice Mode ("Voice Mode" / "Talk") button.
      * - Performs ACTION_CLICK and verifies transition (falling back to an exact bounds tap gesture if needed).
      */
-    private fun scheduleAutoTapPoll(delayMs: Long = 120L) {
-        handler.postDelayed({
-            if (claudeAutoTapArmedEpochMs.get() != 0L) {
-                handleClaudeWindowEvent()
-                if (claudeAutoTapArmedEpochMs.get() != 0L) {
-                    scheduleAutoTapPoll(120L)
-                }
+    private fun checkClaudeWindow() {
+        try {
+            handleClaudeWindowEvent()
+        } catch (e: Exception) {
+            // Log instead of crashing: a crash takes "Hey Google" down until Android restarts the service
+            if (!autoTapErrorLogged.getAndSet(true)) {
+                ChotPrefs.appendLog(this, "Auto-tap error: ${e.javaClass.simpleName}: ${e.message}")
             }
-        }, delayMs)
+        }
     }
 
     private fun getClaudeRootNodes(): List<AccessibilityNodeInfo> {
@@ -364,8 +368,7 @@ class ChotAccessibilityService : AccessibilityService() {
         ChotPrefs.appendLog(this, "Claude didn't open ${elapsed}ms after the widget press: launching it directly")
         val target = ClaudeLauncher.launchClaude(this, ChotPrefs.getLaunchMode(this))
         ChotPrefs.appendLog(this, "Launched $target")
-        // The poll that called this keeps running, so don't start another one
-        arm(viaWidget = false, startPolling = false)
+        armClaudeVoiceAutoTap(this)
     }
 
     /**
@@ -629,34 +632,67 @@ class ChotAccessibilityService : AccessibilityService() {
         private val claudeWindowSeenAtMs = AtomicLong(0L)
         private val claudeWindowLossLogged = AtomicBoolean(false)
         private val launchedViaWidget = AtomicBoolean(false)
+        private val autoTapErrorLogged = AtomicBoolean(false)
+        private val noServiceLogged = AtomicBoolean(false)
+        private val pollGeneration = AtomicInteger(0)
+        private val pollHandler = Handler(Looper.getMainLooper())
 
         private const val FOLLOW_UP_BACK_DELAY_MS = 300L
 
-        // After a press on Claude's widget: how long Claude gets to open before chot launches it directly (a cold
-        // start can take a while), and how long its window gets to enter voice mode before chot looks for the Voice
-        // button
-        private const val WIDGET_OPEN_TIMEOUT_MS = 3000L
-        private const val WIDGET_TAP_GRACE_MS = 2000L
+        // After a press on Claude's widget: how long Claude gets to open before chot launches it directly, and how
+        // long its window gets to enter voice mode before chot looks for the Voice button. On the Pixel 8 chot saw
+        // Claude's window 180-224ms after the press when warm and 269ms when cold, and voice mode at the same moment
+        // when warm and at 505ms when cold. These keep even the fallback under 3s from the hotword.
+        private const val WIDGET_OPEN_TIMEOUT_MS = 1000L
+        private const val WIDGET_TAP_GRACE_MS = 700L
 
         /** Called right after every Claude launch, so it also records the launch time for the follow-up BACK. */
-        fun armClaudeVoiceAutoTap() = arm(viaWidget = false)
+        fun armClaudeVoiceAutoTap(context: Context) = arm(context, viaWidget = false)
 
         /** Called right after pressing the Voice chat button on chot's copy of Claude's widget. */
-        fun armAfterWidgetPress() = arm(viaWidget = true)
+        fun armAfterWidgetPress(context: Context) = arm(context, viaWidget = true)
 
-        private fun arm(viaWidget: Boolean, startPolling: Boolean = true) {
+        private fun arm(context: Context, viaWidget: Boolean) {
             coordinateFallbackScheduled.set(false)
             diagnosticTreeDumped.set(false)
             offScreenRetryLogged.set(false)
             claudeWindowSeenAtMs.set(0L)
             claudeWindowLossLogged.set(false)
+            autoTapErrorLogged.set(false)
+            noServiceLogged.set(false)
             launchedViaWidget.set(viaWidget)
             val now = System.currentTimeMillis()
             lastClaudeLaunchEpochMs.set(now)
             claudeAutoTapArmedEpochMs.set(now)
-            if (startPolling) {
-                instance?.scheduleAutoTapPoll(100L)
-            }
+            schedulePoll(context.applicationContext, pollGeneration.incrementAndGet(), 100L)
+        }
+
+        /**
+         * Checks Claude's window every 120ms while armed, in addition to window events, so Compose updates are caught
+         * quickly. It runs through whichever service instance is connected when it fires, rather than the one
+         * connected at arming, and stops when a newer arming starts its own poll.
+         */
+        private fun schedulePoll(context: Context, generation: Int, delayMs: Long) {
+            pollHandler.postDelayed({
+                if (generation != pollGeneration.get()) return@postDelayed
+                val armedAt = claudeAutoTapArmedEpochMs.get()
+                if (armedAt == 0L) return@postDelayed
+
+                val service = instance
+                if (service != null) {
+                    service.checkClaudeWindow()
+                } else {
+                    if (!noServiceLogged.getAndSet(true)) {
+                        ChotPrefs.appendLog(context, "Auto-tap: chot's accessibility service isn't connected")
+                    }
+                    if (System.currentTimeMillis() - armedAt > 6000L) {
+                        claudeAutoTapArmedEpochMs.set(0L)
+                    }
+                }
+                if (claudeAutoTapArmedEpochMs.get() != 0L) {
+                    schedulePoll(context, generation, 120L)
+                }
+            }, delayMs)
         }
 
         private val GOOGLE_ASSISTANT_PACKAGES = setOf(

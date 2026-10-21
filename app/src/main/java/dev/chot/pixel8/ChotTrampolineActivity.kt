@@ -98,12 +98,12 @@ class ChotTrampolineActivity : Activity() {
             // the Voice button
             val button = voiceChatButton
             val launchedTarget = if (button != null && button.performClick()) {
-                ChotAccessibilityService.armAfterWidgetPress()
+                ChotAccessibilityService.armAfterWidgetPress(this@ChotTrampolineActivity)
                 "Claude widget's Voice chat button (widget laid out in ${widgetLayoutMs}ms)"
             } else {
                 val mode = ChotPrefs.getLaunchMode(this@ChotTrampolineActivity)
                 val target = ClaudeLauncher.launchClaude(this@ChotTrampolineActivity, mode)
-                ChotAccessibilityService.armClaudeVoiceAutoTap()
+                ChotAccessibilityService.armClaudeVoiceAutoTap(this@ChotTrampolineActivity)
                 target
             }
             val totalMs = System.currentTimeMillis() - startTime
