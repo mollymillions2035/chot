@@ -4,26 +4,37 @@ Hardware DSP hotword bridge: intercepts "Hey Google" on a stock Pixel 8 and hand
 
 ## Known issues (ultrareview, 2026-10-20)
 
-Issues 1–5 are fixed (2026-10-21). Issues 6–12 are not yet checked against the code or fixed. All rated normal severity.
+Issues 1–5 are fixed (2026-10-21) and the APK's fixes were checked on the Pixel 8. Issues 6–12 are not yet checked against the code or fixed. All rated normal severity.
 
-### Intercepting things the user didn't ask for (fixed, not yet verified on a device)
-The fixes rest on AOSP 14–17 source and public captures of the Google app, not on a test on the Pixel 8.
+### Intercepting things the user didn't ask for (fixed)
+Checked on the owner's Pixel 8 (Android 17, Google app 17.66.20) on 2026-10-21:
+- "Hey Google" from Settings opened Claude in voice mode 3 times out of 3, with no stray BACK (Settings stayed on the same screen).
+- Not intercepted: opening Gemini by hand, the search-bar mic, Now Playing firing, and "Hey Google" while paused.
+- Every intercept came through the accessibility path. The logcat fast path (see 7) and the daemon were not exercised.
 1. **Opening the Gemini app by hand gets intercepted.** Fixed. The overlay checks now match only the overlay: Gemini's `…robin.ui.floaty.activity.FloatyActivity` (by class, or its `assistant_robin_floaty_root_container` root view), or classic Assistant's `VoiceInteractionSession` window, which accessibility reports as window type -1 (never `TYPE_SYSTEM`). The full Gemini app is `…robin.main.MainActivity` in the Google app, which the old `com.google.android.apps.search.assistant` token and `:id/assistant_` view ids also matched; both are gone, along with the bard package token and the "Gemini" title match. The legacy classic-Assistant class tokens (`OpaActivity`, `ZeroState`, `VoicePlate` …) are still there, unverified; on current builds they match nothing or only classic-Assistant screens.
 2. **Manual Google voice search gets intercepted.** Fixed. Window-state events from `NORMAL_SEARCH_CLASSES` are excluded before any overlay check. What actually caught voice search was the "Listening…" text heuristic, which content events and the mic path reached without that exclusion; it is gone, along with "Ask Gemini", which matched the Gemini app.
 3. **Other on-device sound models count as "Hey Google".** Fixed in the APK and the daemon. Both key on `I/AlwaysOnHotwordDetector: onDetected`, which only the default assistant's hotword detector logs, so generic models such as Now Playing can't produce it. Quick Phrases might, if the Google app runs them through the same detector (unverified), so both treat the line as a hint and act only once the overlay is up. The old matches were dead on Android 14+ anyway: VIMS logs under `VoiceInteractionManager` and nothing at INFO, and SoundTrigger prints `RECOGNITION (`, not `onRecognition`.
-4. **The logcat fast path presses BACK in the wrong app.** Fixed. A logcat hit (`onDetected`, or the `FloatyActivity` START line) only starts a 2s poll; BACK and the cooldown happen once the overlay is on screen, and an expired hint is logged. The daemon, whose old patterns never matched on Android 14+ and which this fix brought back to life, now waits for `mCurrentFocus` to be the overlay (`dumpsys window displays`) before it does anything.
+4. **The logcat fast path presses BACK in the wrong app.** Fixed. A logcat hit (`onDetected`, or the `FloatyActivity` START line) only starts a 2s poll; BACK and the cooldown happen once the overlay is on screen, and an expired hint is logged. The daemon, whose old patterns never matched on Android 14+ (none of them appear in the Pixel 8's log) and which this fix brought back to life, now waits for `mCurrentFocus` to be the overlay (`dumpsys window displays`) before it does anything.
 5. **The pause switch doesn't stop the mic callback path.** Fixed. `triggerIntercept` checks `ChotPrefs.isEnabled`. The Test button (`manual = true`) still runs while paused and sends no BACK.
 
-To verify on the Pixel 8: `adb logcat -v brief -s AlwaysOnHotwordDetector ActivityTaskManager` while saying "Hey Google" should show `onDetected` and a `FloatyActivity` START, and `adb shell uiautomator dump` of the overlay should contain `assistant_robin_floaty_root_container`. Opening Gemini by hand, the search-bar mic, Now Playing and a Quick Phrase should log no intercept.
+What the Pixel 8 does (Android 17, Google app 17.66.20), for future matching work:
+- **"Hey Google":** logs `I/SoundTriggerMiddlewareLogging: RECOGNITION (<handle>, PhraseRecognitionEventSys{… type: 0 … PhraseRecognitionExtra{id: 101 …`, then `I/AlwaysOnHotwordDetector: onDetected`, then `D/VoiceInteractionManager: Self-trigger check: VIS triggering from recent hotword`.
+  - It then starts `FloatyActivity` (LAUNCH_SINGLE_TASK) within about a second. While it is up, `mCurrentFocus=Window{… u0 com.google.android.googlequicksearchbox/…robin.ui.floaty.activity.FloatyActivity}`, and every view id is `assistant_robin_floaty_*`.
+- **Now Playing:** logs `RECOGNITION (<handle>, RecognitionEventSys{… type: 1 …` with data `pos_music,val:…`.
+- **Gemini opened by hand:** bard `BardEntryPointActivity`, then GSA `MainAssistantDeeplinkAnimated`, then `…robin.main.MainActivity`, with `assistant_robin_*` ids and no `floaty` ids.
+- **Search-bar mic:** GSA `.InternalGoogleAppActivityEntrypoint`, with `googleapp_voice_search_*` ids.
+- **Testing tip:** `adb shell uiautomator dump` rebinds accessibility services, so Chot logs "connected & armed" after each dump.
 
 ### Setup and edge cases
 6. **Locked phone drops the request.** `requestDismissKeyguard(this, null)` doesn't wait for the unlock, so Claude launches behind the keyguard and the auto-tap times out. Launch from `onDismissSucceeded`. `ChotTrampolineActivity.kt:36`.
 7. **The logcat fast path may never work on Android 13+.** The watcher starts from `onServiceConnected` while Chot is in the background, so logd's per-session consent is denied without any error. The `logcatThread?.isAlive` guard then stops `MainActivity.onResume` from restarting it, yet the checklist still shows it as active. This depends on OS behaviour that hasn't been verified. `ChotAccessibilityService.kt:212`.
+   - **Seen on the Pixel 8 (Android 17):** SystemUI's `LogAccessDialogActivity` was destroyed right after install, and Chot logged no `DSP-Logcat` intercept or expired hint across 5 hotwords, although `onDetected` was in the log. That fits a denied consent. It isn't proof, though: a hint that loses the race to the accessibility path logs nothing.
 8. **The daemon taps without checking, at the wrong spot.**
    - `pixel8-instant-adb-daemon.sh:78-88` taps 0.75s after every trigger without checking that `am start` worked or that Claude has focus.
    - It taps at y=2195, but the measured button center is (955, 2234), per `ChotPrefs.kt:73`.
    - `MainActivity.kt:247` falls back to 88.5%/91.5% where the default is 88.4%/93.1%.
 9. **Assistant settings don't match.** `pixel8-adb-setup.sh:66-69` sets `assistant` to `OpaActivity` and `voice_interaction_service` to `GsaVoiceInteractionService`. It never changes the ASSISTANT role, so a role sync can revert both settings. The suggested fix is `cmd role add-role-holder android.app.role.ASSISTANT com.google.android.googlequicksearchbox`.
+   - **Seen on the Pixel 8 (2026-10-21):** `assistant` is set to `…/com.google.android.voiceinteraction.GsaVoiceInteractionService`, the same component as `voice_interaction_service`, not `OpaActivity`. The script's restore branch would write a different value from the one the phone uses.
    - **Observed on device:** long-pressing the power button currently opens a Claude voice chat successfully. The owner hasn't decided whether that's desirable, so confirm with them before "fixing" this.
 10. **The daemon force-stops the Google app on every trigger.** `am force-stop com.google.android.googlequicksearchbox` tears down the VoiceInteractionService and hotword detector the bridge depends on, so the next "Hey Google" may not be detected. It also cancels Google's alarms and jobs. Drop it and rely on BACK, as the APK does. `pixel8-instant-adb-daemon.sh:72`.
 11. **The daemon's ASSIST fallback never runs.** `tr -d " \r"` strips the spaces from "No activities found" before the `*"No activities"*` check, so that check can't match. Without a VOICE_ASSIST activity, the daemon opens Claude's main activity instead of the assistant overlay. Compare before stripping, or check for `/`. `pixel8-instant-adb-daemon.sh:28-29`.
