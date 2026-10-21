@@ -14,12 +14,12 @@ On stock Android (Pixel 8 `user` builds):
 ### How `Chot` Solves All Three Problems
 
 1. **Zero-Battery Tensor G3 DSP Remains Active:** Google stays registered as the system `voice_interaction_service` so hardware `"Hey Google"` works everywhere (including lock screen / AOD).
-2. **Triple-Sensor Hotword Interception (Zero False Positives on Normal Google Search):**
-   - **Sensor 1 — Hardware DSP Logcat Fast-Path (when `READ_LOGS` is granted via ADB):** Tails filtered system logcat (`AlwaysOnHotwordDetector`, `ActivityTaskManager`) for the default assistant's own hotword detection (`onDetected`, which generic sound models such as Now Playing can't log) and the start of Gemini's overlay activity. Both are logged before the Assistant UI finishes inflating, so a hit only starts a short poll; Chot intercepts once the overlay is actually on screen.
-   - **Sensor 2 — Assistant/Gemini Overlay Window Inspector (Works 100% standalone without ADB):** Matches only the voice overlay itself: Gemini's `FloatyActivity` (by class, or by its `assistant_robin_floaty_root_container` root view) and classic Assistant's `VoiceInteractionSession` window (`TYPE_VOICE_INTERACTION`, which accessibility reports as window type `-1`). Normal Google Search (`SearchActivity`, `GoogleAppActivity`, including the search-bar mic's voice search) and the full Gemini app (`robin.main.MainActivity`) never match: window-state events from normal Search are excluded up front, and the overlay check itself uses no text or generic view-id heuristics.
-   - **Sensor 3 — `AudioManager.AudioRecordingCallback`:** Monitors live microphone recording states in real time.
+2. **Dual-Sensor Hotword Interception (Zero False Positives on Normal Google Search):**
+   - **Sensor 1 — Assistant/Gemini Overlay Window Inspector (Works 100% standalone without ADB):** Matches only the voice overlay itself: Gemini's `FloatyActivity` (by class, or by its `assistant_robin_floaty_root_container` root view) and classic Assistant's `VoiceInteractionSession` window (`TYPE_VOICE_INTERACTION`, which accessibility reports as window type `-1`). Normal Google Search (`SearchActivity`, `GoogleAppActivity`, including the search-bar mic's voice search) and the full Gemini app (`robin.main.MainActivity`) never match: window-state events from normal Search are excluded up front, and the overlay check itself uses no text or generic view-id heuristics.
+   - **Sensor 2 — `AudioManager.AudioRecordingCallback`:** Monitors live microphone recording states in real time.
+   - **No logcat sensor in the app:** since Android 13, an app reading other apps' logs needs the user's consent for every logcat session, and Android only asks while the app is on screen. A logcat hint also can't act before the overlay is on screen, which Sensor 1 already catches. The ADB daemon below still uses logcat, since `adb shell` needs no consent.
 3. **Deterministic Microphone Handover (`ChotTrampolineActivity`):**
-   - Sends `GLOBAL_ACTION_BACK` to dismiss Google's Assistant / Gemini overlay (only once it is confirmed on screen, not as soon as a logcat line hints at it).
+   - Sends `GLOBAL_ACTION_BACK` to dismiss Google's Assistant / Gemini overlay (only once it is confirmed on screen).
    - Requests `AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE` to force Google's `SpeechRecognizer` / `AudioRecord` to immediately abort.
    - Polls `AudioManager.getActiveRecordingConfigurations()` (every 20ms, up to 340ms) until the microphone is verified free, releases transient audio focus, wakes/unlocks the screen if triggered from AOD/lock screen, and launches Claude.
 4. **Cascading Claude Voice Mode Launch + Auto-Tap:**
@@ -35,7 +35,7 @@ On stock Android (Pixel 8 `user` builds):
    ```bash
    ./scripts/build-apk.sh
    ```
-3. Plug in your Pixel 8 and run the automated setup script (installs `chot-pixel8.apk`, grants `READ_LOGS`, `WRITE_SECURE_SETTINGS`, and `SYSTEM_ALERT_WINDOW`, ensures Google's hardware DSP hotword service is active, and enables `ChotAccessibilityService` automatically):
+3. Plug in your Pixel 8 and run the automated setup script (installs `chot-pixel8.apk`, grants `WRITE_SECURE_SETTINGS` and `SYSTEM_ALERT_WINDOW`, ensures Google's hardware DSP hotword service is active, and enables `ChotAccessibilityService` automatically):
    ```bash
    ./scripts/pixel8-adb-setup.sh
    ```

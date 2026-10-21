@@ -8,11 +8,6 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Optional: Wakes screen when hotword triggers on AOD / lock screen -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <!-- Optional: Enables the hardware DSP hotword logcat fast-path via ADB:
-         adb shell pm grant dev.chot.pixel8 android.permission.READ_LOGS -->
-    <uses-permission
-        android:name="android.permission.READ_LOGS"
-        tools:ignore="ProtectedPermissions" />
     <!-- Optional: Allows automatic self-healing of accessibility settings via ADB:
          adb shell pm grant dev.chot.pixel8 android.permission.WRITE_SECURE_SETTINGS -->
     <uses-permission
@@ -63,7 +58,7 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- Core Interceptor Service: watches Pixel 8 hardware DSP "Hey Google" trigger
-             (via both Accessibility Window/Overlay inspection + optional READ_LOGS fast-path),
+             (via Accessibility Window/Overlay inspection + microphone recording callbacks),
              dismisses Google Assistant, waits for mic release, and launches Claude Voice Mode -->
         <service
             android:name=".ChotAccessibilityService"

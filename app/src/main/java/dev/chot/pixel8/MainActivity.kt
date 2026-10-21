@@ -41,7 +41,6 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         refreshStatusAndLogs()
-        ChotAccessibilityService.instance?.startLogcatDspWatcherIfPermitted()
     }
 
     private fun buildUi(): View {
@@ -358,16 +357,6 @@ class MainActivity : Activity() {
             "Tap '2. Overlay Permission' below (or run setup script) so Android 14+ allows instant background launch of Claude"
         }
         statusContainer.addView(statusRow("Display Over Other Apps (BAL)", hasOverlay, overlayMsg))
-
-        // 5. Check Optional ADB READ_LOGS Fast-Path
-        val hasReadLogs = checkSelfPermission(android.Manifest.permission.READ_LOGS) ==
-            PackageManager.PERMISSION_GRANTED
-        val readLogsMsg = if (hasReadLogs) {
-            "GRANTED — AlwaysOnHotwordDetector DSP logcat sensor active"
-        } else {
-            "Optional (Standalone UI mode active). For the DSP logcat fast-path run:\nadb shell pm grant dev.chot.pixel8 android.permission.READ_LOGS"
-        }
-        statusContainer.addView(statusRow("Hardware DSP Logcat Fast-Path", hasReadLogs, readLogsMsg))
 
         logTextView.text = ChotPrefs.getLogs(this)
     }
