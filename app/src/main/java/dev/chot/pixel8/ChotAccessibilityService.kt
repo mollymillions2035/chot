@@ -336,7 +336,7 @@ class ChotAccessibilityService : AccessibilityService() {
             !coordinateFallbackScheduled.getAndSet(true)
         ) {
             claudeAutoTapArmedEpochMs.set(0L)
-            dispatchCoordinateTap()
+            dispatchCoordinateTap(roots)
         }
     }
 
@@ -403,7 +403,13 @@ class ChotAccessibilityService : AccessibilityService() {
 
     private fun collectNodeSummary(node: AccessibilityNodeInfo, depth: Int, out: MutableList<String>) {
         if (depth > 40 || out.size >= 25) return
-        val t = node.text?.toString()?.trim().orEmpty()
+        val rawText = node.text?.toString()?.trim().orEmpty()
+        // A text box's text is the owner's draft: log only that there is one, not what it says
+        val t = if (node.isEditable && rawText.isNotEmpty() && !node.isShowingHintText) {
+            "<draft, ${rawText.length} chars>"
+        } else {
+            rawText
+        }
         val d = node.contentDescription?.toString()?.trim().orEmpty()
         val id = node.viewIdResourceName?.substringAfterLast('/')?.trim().orEmpty()
         if (t.isNotEmpty() || d.isNotEmpty() || id.isNotEmpty() || node.isClickable) {
@@ -492,15 +498,79 @@ class ChotAccessibilityService : AccessibilityService() {
         return false
     }
 
-    private fun dispatchCoordinateTap() {
+    /**
+     * Taps the configured spot, but only where it can't hit anything other than an unlabeled Voice button: with a
+     * draft in Claude's text box, Send sits exactly there, and in a Claude Code session it can be Stop.
+     */
+    private fun dispatchCoordinateTap(claudeRoots: List<AccessibilityNodeInfo>) {
         val dm = resources.displayMetrics
         val x = dm.widthPixels * ChotPrefs.getTapXPercent(this)
         val y = dm.heightPixels * ChotPrefs.getTapYPercent(this)
+        val point = "(${x.toInt()}, ${y.toInt()})"
+
+        if (isKeyboardAt(x.toInt(), y.toInt())) {
+            ChotPrefs.appendLog(this, "Coordinate fallback skipped: the keyboard covers $point")
+            return
+        }
+        val target = claudeRoots.firstNotNullOfOrNull { findClickableAt(it, x.toInt(), y.toInt()) }
+        val label = target?.let { describeLabel(it) }.orEmpty()
+        if (target != null && label.isNotEmpty() && findClaudeVoiceModeButton(target) == null) {
+            ChotPrefs.appendLog(this, "Coordinate fallback skipped: $point is on '$label'")
+            return
+        }
+
         val ok = dispatchTapGesture(x, y)
-        ChotPrefs.appendLog(
-            this,
-            "Coordinate fallback tap at (${x.toInt()}, ${y.toInt()}) -> $ok"
-        )
+        ChotPrefs.appendLog(this, "Coordinate fallback tap at $point -> $ok")
+    }
+
+    private fun isKeyboardAt(x: Int, y: Int): Boolean {
+        return try {
+            windows?.any { win ->
+                if (win.type != AccessibilityWindowInfo.TYPE_INPUT_METHOD) return@any false
+                val r = Rect()
+                win.getBoundsInScreen(r)
+                r.contains(x, y)
+            } == true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** The smallest clickable node under (x, y). */
+    private fun findClickableAt(node: AccessibilityNodeInfo, x: Int, y: Int, depth: Int = 0): AccessibilityNodeInfo? {
+        if (depth > 40) return null
+        val r = Rect()
+        node.getBoundsInScreen(r)
+        if (!r.contains(x, y)) return null
+        for (i in 0 until node.childCount) {
+            val child = try {
+                node.getChild(i)
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            findClickableAt(child, x, y, depth + 1)?.let { return it }
+        }
+        return if (node.isClickable) node else null
+    }
+
+    /**
+     * A node's own label, or the first one inside it (Claude puts the Voice button's label on a child). A text box
+     * counts as labeled but is never quoted, so the owner's draft stays out of the log.
+     */
+    private fun describeLabel(node: AccessibilityNodeInfo, depth: Int = 0): String? {
+        if (depth > 6) return null
+        if (node.isEditable) return "text box"
+        val own = (node.contentDescription ?: node.text)?.toString()?.trim()
+        if (!own.isNullOrEmpty()) return own
+        for (i in 0 until node.childCount) {
+            val child = try {
+                node.getChild(i)
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            describeLabel(child, depth + 1)?.let { return it }
+        }
+        return null
     }
 
     private fun dispatchTapGesture(x: Float, y: Float): Boolean {
