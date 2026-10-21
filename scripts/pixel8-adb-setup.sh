@@ -43,7 +43,7 @@ if [ ! -f "$APK_PATH" ]; then
     fi
 fi
 
-echo "==> 1/6 Installing Chot APK ($APK_PATH)..."
+echo "==> 1/6 Installing chot APK ($APK_PATH)..."
 adb install -r "$APK_PATH"
 
 PKG="dev.chot.pixel8"
@@ -67,7 +67,7 @@ if [[ "$CURRENT_VIS" == *"googlequicksearchbox"* ]]; then
     echo "    Google is the default assistant ($CURRENT_VIS)."
 else
     echo "    WARNING: Google is not the default assistant (voice_interaction_service: ${CURRENT_VIS:-none})."
-    echo "    \"Hey Google\" only reaches Chot while Google (Gemini) is the default digital assistant. Set it on the phone:"
+    echo "    \"Hey Google\" only reaches chot while Google (Gemini) is the default digital assistant. Set it on the phone:"
     echo "    Settings > Apps > Default apps > Digital assistant app > Google (Gemini)"
 fi
 
@@ -83,12 +83,12 @@ fi
 adb shell settings put secure enabled_accessibility_services "$NEW_ACC"
 adb shell settings put secure accessibility_enabled 1
 
-echo "==> 6/6 Launching Chot status dashboard on Pixel 8..."
+echo "==> 6/6 Launching chot status dashboard on Pixel 8..."
 adb shell am start -n "$PKG/$PKG.MainActivity"
 
 echo ""
 echo "=================================================================="
-echo " SUCCESS! Chot is active on your $DEVICE_MODEL."
+echo " SUCCESS! chot is active on your $DEVICE_MODEL."
 echo " Say 'Hey Google' — it will immediately dismiss Google Assistant"
 echo " and launch Claude into Voice Mode!"
 echo "=================================================================="

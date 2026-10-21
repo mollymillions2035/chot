@@ -1,4 +1,4 @@
-# Chot (`dev.chot.pixel8`) — Hardware DSP Hotword Bridge for Claude on Stock Pixel 8
+# chot (`dev.chot.pixel8`) — Hardware DSP Hotword Bridge for Claude on Stock Pixel 8
 
 Makes **"Hey Google"** launch **Claude Voice Mode / Assistant Overlay** (`com.anthropic.claude`) hands-free on an **unrooted, stock Pixel 8** while retaining the Tensor G3's zero-battery hardware audio DSP.
 
@@ -11,7 +11,7 @@ On stock Android (Pixel 8 `user` builds):
 2. If you change Android's **Default Digital Assistant** setting from Google to Claude, `VoiceInteractionManagerService` unbinds Google's `HotwordDetectionService` and **turns off the Tensor G3 hardware DSP**.
 3. If you keep Google as the Default Digital Assistant so the hardware DSP stays active, saying `"Hey Google"` opens Google's `VoiceInteractionSession` overlay (`TYPE_VOICE_INTERACTION`), which locks the microphone (`AudioRecord`) and prevents Claude from recording your voice.
 
-### How `Chot` Solves All Three Problems
+### How `chot` Solves All Three Problems
 
 1. **Zero-Battery Tensor G3 DSP Remains Active:** Google stays registered as the system `voice_interaction_service` so hardware `"Hey Google"` works everywhere (including lock screen / AOD).
 2. **Dual-Sensor Hotword Interception (Zero False Positives on Normal Google Search):**
@@ -31,7 +31,7 @@ On stock Android (Pixel 8 `user` builds):
 ## Quick Start (One-Command Build + Auto-Setup over ADB)
 
 1. Make sure the official **Claude** app (`com.anthropic.claude`) is installed on your Pixel 8 and **USB Debugging** (or Wireless Debugging) is enabled.
-   Google (Gemini) must be your **default digital assistant** (Settings → Apps → Default apps → Digital assistant app). Chot needs Google's hotword detection running, and it doesn't change this setting for you.
+   Google (Gemini) must be your **default digital assistant** (Settings → Apps → Default apps → Digital assistant app). chot needs Google's hotword detection running, and it doesn't change this setting for you.
 2. Build the signed APK (automatically downloads portable JDK 17, Android SDK 34, and Gradle 8.7 into `.toolchain/` if not installed on your machine):
    ```bash
    ./scripts/build-apk.sh
