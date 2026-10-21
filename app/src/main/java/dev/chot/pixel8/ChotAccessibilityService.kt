@@ -2,14 +2,18 @@ package dev.chot.pixel8
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Path
 import android.graphics.Rect
 import android.media.AudioManager
 import android.media.AudioRecordingConfiguration
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -38,6 +42,13 @@ class ChotAccessibilityService : AccessibilityService() {
         }
     }
 
+    // Records when the screen last came on, for the trampoline's unlock prompt (see lastScreenOnElapsedMs)
+    private val screenOnReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            lastScreenOnElapsedMs = SystemClock.elapsedRealtime()
+        }
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
@@ -45,6 +56,13 @@ class ChotAccessibilityService : AccessibilityService() {
 
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         audioManager.registerAudioRecordingCallback(audioRecordingCallback, handler)
+
+        val screenOn = IntentFilter(Intent.ACTION_SCREEN_ON)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(screenOnReceiver, screenOn, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(screenOnReceiver, screenOn)
+        }
     }
 
     override fun onDestroy() {
@@ -55,6 +73,10 @@ class ChotAccessibilityService : AccessibilityService() {
         try {
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             audioManager.unregisterAudioRecordingCallback(audioRecordingCallback)
+        } catch (_: Exception) {
+        }
+        try {
+            unregisterReceiver(screenOnReceiver)
         } catch (_: Exception) {
         }
         super.onDestroy()
@@ -598,6 +620,11 @@ class ChotAccessibilityService : AccessibilityService() {
     companion object {
         @Volatile
         var instance: ChotAccessibilityService? = null
+            private set
+
+        /** `SystemClock.elapsedRealtime()` when the screen last came on, or 0 if it hasn't since chot connected. */
+        @Volatile
+        var lastScreenOnElapsedMs = 0L
             private set
 
         private val claudeAutoTapArmedEpochMs = AtomicLong(0L)
