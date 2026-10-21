@@ -277,7 +277,7 @@ class ChotAccessibilityService : AccessibilityService() {
         val elapsed = System.currentTimeMillis() - armedAt
         if (elapsed > 6000L) {
             claudeAutoTapArmedEpochMs.set(0L)
-            val seen = if (claudeWindowSeen.get()) "was seen" else "was never seen"
+            val seen = if (claudeWindowSeenAtMs.get() > 0L) "was seen" else "was never seen"
             ChotPrefs.appendLog(this, "Auto-tap gave up after 6s, Claude's window $seen (focus: ${describeFocusedWindow()})")
             return
         }
@@ -292,10 +292,15 @@ class ChotAccessibilityService : AccessibilityService() {
         // Wait at least 180ms after arming so AssistantOverlayActivity -> MainActivity transition starts
         if (elapsed < 180L) return
 
+        val viaWidget = launchedViaWidget.get()
         val roots = getClaudeRootNodes()
         if (roots.isEmpty()) {
+            if (viaWidget && claudeWindowSeenAtMs.get() == 0L && elapsed >= WIDGET_OPEN_TIMEOUT_MS) {
+                launchClaudeAfterWidgetPress(elapsed)
+                return
+            }
             // Claude's window was up and is gone before voice mode started, e.g. closed by a stray BACK
-            if (claudeWindowSeen.get() && !claudeWindowLossLogged.getAndSet(true)) {
+            if (claudeWindowSeenAtMs.get() > 0L && !claudeWindowLossLogged.getAndSet(true)) {
                 ChotPrefs.appendLog(
                     this,
                     "Claude's window left the screen at ${elapsed}ms before voice mode (focus: ${describeFocusedWindow()})"
@@ -303,20 +308,29 @@ class ChotAccessibilityService : AccessibilityService() {
             }
             return
         }
-        claudeWindowSeen.set(true)
+        claudeWindowSeenAtMs.compareAndSet(0L, elapsed)
+
+        // After a press on Claude's widget, voice mode starts by itself: give it time, counted from when Claude's
+        // window appeared, before tapping anything
+        val tapAllowedAfterMs = if (viaWidget) claudeWindowSeenAtMs.get() + WIDGET_TAP_GRACE_MS else 180L
 
         for (root in roots) {
             // 1. Check if Claude is already in active Voice Mode UI
             if (isClaudeAlreadyInVoiceMode(root)) {
                 claudeAutoTapArmedEpochMs.set(0L)
-                ChotPrefs.appendLog(this, "Claude Voice Mode is active and listening (${elapsed}ms)")
+                // After a widget press, also log when Claude's window appeared, to tune WIDGET_OPEN_TIMEOUT_MS
+                val window = if (viaWidget) ", window at ${claudeWindowSeenAtMs.get()}ms" else ""
+                ChotPrefs.appendLog(this, "Claude Voice Mode is active and listening (${elapsed}ms$window)")
                 return
             }
+
+            if (elapsed < tapAllowedAfterMs) continue
 
             // 2. Search for the Voice Mode ("Voice Mode" / "Talk") button in Claude's accessibility tree
             val voiceButton = findClaudeVoiceModeButton(root) ?: continue
             if (tapVoiceButton(voiceButton)) return
         }
+        if (elapsed < tapAllowedAfterMs) return
 
         // Dump visible Claude nodes once at ~1200ms if no Voice Mode button has been tapped yet
         if (elapsed >= 1200L && !diagnosticTreeDumped.getAndSet(true)) {
@@ -340,6 +354,18 @@ class ChotAccessibilityService : AccessibilityService() {
                 claudeAutoTapArmedEpochMs.set(0L)
             }
         }
+    }
+
+    /**
+     * The widget press didn't bring Claude up, for example because the system blocked the launch: start Claude the
+     * usual way and let the auto-tap find the Voice button.
+     */
+    private fun launchClaudeAfterWidgetPress(elapsed: Long) {
+        ChotPrefs.appendLog(this, "Claude didn't open ${elapsed}ms after the widget press: launching it directly")
+        val target = ClaudeLauncher.launchClaude(this, ChotPrefs.getLaunchMode(this))
+        ChotPrefs.appendLog(this, "Launched $target")
+        // The poll that called this keeps running, so don't start another one
+        arm(viaWidget = false, startPolling = false)
     }
 
     /**
@@ -599,22 +625,38 @@ class ChotAccessibilityService : AccessibilityService() {
         private val coordinateFallbackScheduled = AtomicBoolean(false)
         private val diagnosticTreeDumped = AtomicBoolean(false)
         private val offScreenRetryLogged = AtomicBoolean(false)
-        private val claudeWindowSeen = AtomicBoolean(false)
+        // Milliseconds after arming when Claude's window first showed up, 0 until it does
+        private val claudeWindowSeenAtMs = AtomicLong(0L)
         private val claudeWindowLossLogged = AtomicBoolean(false)
+        private val launchedViaWidget = AtomicBoolean(false)
 
         private const val FOLLOW_UP_BACK_DELAY_MS = 300L
 
+        // After a press on Claude's widget: how long Claude gets to open before chot launches it directly (a cold
+        // start can take a while), and how long its window gets to enter voice mode before chot looks for the Voice
+        // button
+        private const val WIDGET_OPEN_TIMEOUT_MS = 3000L
+        private const val WIDGET_TAP_GRACE_MS = 2000L
+
         /** Called right after every Claude launch, so it also records the launch time for the follow-up BACK. */
-        fun armClaudeVoiceAutoTap() {
+        fun armClaudeVoiceAutoTap() = arm(viaWidget = false)
+
+        /** Called right after pressing the Voice chat button on chot's copy of Claude's widget. */
+        fun armAfterWidgetPress() = arm(viaWidget = true)
+
+        private fun arm(viaWidget: Boolean, startPolling: Boolean = true) {
             coordinateFallbackScheduled.set(false)
             diagnosticTreeDumped.set(false)
             offScreenRetryLogged.set(false)
-            claudeWindowSeen.set(false)
+            claudeWindowSeenAtMs.set(0L)
             claudeWindowLossLogged.set(false)
+            launchedViaWidget.set(viaWidget)
             val now = System.currentTimeMillis()
             lastClaudeLaunchEpochMs.set(now)
             claudeAutoTapArmedEpochMs.set(now)
-            instance?.scheduleAutoTapPoll(100L)
+            if (startPolling) {
+                instance?.scheduleAutoTapPoll(100L)
+            }
         }
 
         private val GOOGLE_ASSISTANT_PACKAGES = setOf(

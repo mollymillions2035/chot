@@ -23,6 +23,7 @@ On stock Android (Pixel 8 `user` builds):
    - Requests `AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE` to force Google's `SpeechRecognizer` / `AudioRecord` to immediately abort.
    - Polls `AudioManager.getActiveRecordingConfigurations()` (every 20ms, up to 340ms) until the microphone is verified free, releases transient audio focus, wakes/unlocks the screen if triggered from AOD/lock screen, and launches Claude.
 4. **Cascading Claude Voice Mode Launch + Auto-Tap:**
+   - **Claude's widget first:** chot binds its own, never-shown copy of Claude's home-screen widget and presses its **Voice chat** button. That fires Claude's own launch into voice mode, which works whatever screen Claude is on, including with a draft in the text box or a Claude Code session open, and doesn't depend on reading Claude's screen. chot checks that voice mode started, and falls back to the steps below if the widget isn't set up or Claude doesn't open.
    - Queries `PackageManager` for `com.anthropic.claude`'s exported `ACTION_VOICE_ASSIST` and `ACTION_ASSIST` activities (`AssistantOverlayActivity` / `MainActivity`) and launches them directly into a new chat.
    - Actively polls `com.anthropic.claude`'s Jetpack Compose accessibility semantics tree (`depth <= 40`, every `120ms`) and clicks the **Voice Mode** (`contentDescription = "Voice Mode"` / `text = "Talk"`) button at `[943,2222][967,2247]` (`88.4% X, 93.1% Y` on Pixel 8 `1080x2400`).
 
@@ -40,7 +41,8 @@ On stock Android (Pixel 8 `user` builds):
    ```bash
    ./scripts/pixel8-adb-setup.sh
    ```
-4. Say **"Hey Google"** to your Pixel 8 — Google Assistant is instantly dismissed, the mic is handed over, and Claude opens directly into Voice Mode!
+4. Open chot on the phone, tap **4. Claude Widget (Voice chat button)** and allow chot to create widgets. This one-time step lets chot start voice mode through Claude's own widget. Your home screen doesn't change.
+5. Say **"Hey Google"** to your Pixel 8 — Google Assistant is instantly dismissed, the mic is handed over, and Claude opens directly into Voice Mode!
 
 ---
 
