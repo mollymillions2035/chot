@@ -1,6 +1,7 @@
 package dev.chot.pixel8
 
 import android.app.Activity
+import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -30,6 +31,7 @@ class MainActivity : Activity() {
 
     private lateinit var statusContainer: LinearLayout
     private lateinit var logTextView: TextView
+    private var pendingWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -160,6 +162,13 @@ class MainActivity : Activity() {
         )
 
         readinessCard.addView(buttonRow)
+        readinessCard.addView(
+            styledButton("4. Claude Widget (Voice chat button)", "#252A38") { setUpClaudeWidget() },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(8) }
+        )
         root.addView(readinessCard, cardLayoutParams())
 
         // Launch Strategy & Voice Auto-Tap Card
@@ -358,7 +367,63 @@ class MainActivity : Activity() {
         }
         statusContainer.addView(statusRow("Display Over Other Apps (BAL)", hasOverlay, overlayMsg))
 
+        // 5. Check chot's copy of Claude's widget, whose Voice chat button starts voice mode directly
+        val widgetId = ClaudeWidget.boundWidgetId(this)
+        val widgetMsg = when {
+            widgetId != null ->
+                "SET UP • \"Hey Google\" presses the widget's Voice chat button, which starts voice mode even with a draft or a Claude Code session open"
+            ClaudeWidget.findProvider(this) == null ->
+                "Claude's widget isn't available. Update the Claude app. Until then chot opens Claude and taps its Voice button."
+            else ->
+                "Not set up • Tap '4. Claude Widget' below. Without it chot opens Claude and taps its Voice button, which fails with a draft or a Claude Code session open."
+        }
+        statusContainer.addView(statusRow("Claude Widget (Voice chat button)", widgetId != null, widgetMsg))
+
         logTextView.text = ChotPrefs.getLogs(this)
+    }
+
+    /** Binds chot's own, never-shown copy of Claude's widget. The first time, the system asks the owner. */
+    private fun setUpClaudeWidget() {
+        val provider = ClaudeWidget.findProvider(this)
+        if (provider == null) {
+            Toast.makeText(this, "Claude's widget isn't available. Update the Claude app.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val id = ClaudeWidget.allocateWidgetId(this)
+        if (ClaudeWidget.tryBind(this, id, provider)) {
+            onClaudeWidgetBound(id)
+            return
+        }
+        pendingWidgetId = id
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(ClaudeWidget.bindPermissionIntent(id, provider), REQUEST_BIND_CLAUDE_WIDGET)
+        } catch (_: Exception) {
+            ClaudeWidget.release(this, id)
+            Toast.makeText(this, "This phone doesn't offer the widget permission prompt.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_BIND_CLAUDE_WIDGET) return
+        val id = data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId) ?: pendingWidgetId
+        pendingWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
+        if (id == AppWidgetManager.INVALID_APPWIDGET_ID) return
+        if (resultCode == RESULT_OK) {
+            onClaudeWidgetBound(id)
+        } else {
+            ClaudeWidget.release(this, id)
+            Toast.makeText(this, "chot needs that permission to use Claude's widget.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun onClaudeWidgetBound(id: Int) {
+        ClaudeWidget.onBound(this, id)
+        Toast.makeText(this, "Claude's widget is set up.", Toast.LENGTH_SHORT).show()
+        refreshStatusAndLogs()
     }
 
     private fun isAccessibilityServiceEnabled(): Boolean {
@@ -489,4 +554,8 @@ class MainActivity : Activity() {
             value.toFloat(),
             resources.displayMetrics
         ).toInt()
+
+    companion object {
+        private const val REQUEST_BIND_CLAUDE_WIDGET = 1
+    }
 }

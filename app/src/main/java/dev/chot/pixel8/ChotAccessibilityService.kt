@@ -277,7 +277,7 @@ class ChotAccessibilityService : AccessibilityService() {
         val elapsed = System.currentTimeMillis() - armedAt
         if (elapsed > 6000L) {
             claudeAutoTapArmedEpochMs.set(0L)
-            val seen = if (claudeWindowSeen.get()) "was seen" else "was never seen"
+            val seen = if (claudeWindowSeenAtMs.get() > 0L) "was seen" else "was never seen"
             ChotPrefs.appendLog(this, "Auto-tap gave up after 6s, Claude's window $seen (focus: ${describeFocusedWindow()})")
             return
         }
@@ -292,10 +292,15 @@ class ChotAccessibilityService : AccessibilityService() {
         // Wait at least 180ms after arming so AssistantOverlayActivity -> MainActivity transition starts
         if (elapsed < 180L) return
 
+        val viaWidget = launchedViaWidget.get()
         val roots = getClaudeRootNodes()
         if (roots.isEmpty()) {
+            if (viaWidget && claudeWindowSeenAtMs.get() == 0L && elapsed >= WIDGET_OPEN_TIMEOUT_MS) {
+                launchClaudeAfterWidgetPress(elapsed)
+                return
+            }
             // Claude's window was up and is gone before voice mode started, e.g. closed by a stray BACK
-            if (claudeWindowSeen.get() && !claudeWindowLossLogged.getAndSet(true)) {
+            if (claudeWindowSeenAtMs.get() > 0L && !claudeWindowLossLogged.getAndSet(true)) {
                 ChotPrefs.appendLog(
                     this,
                     "Claude's window left the screen at ${elapsed}ms before voice mode (focus: ${describeFocusedWindow()})"
@@ -303,20 +308,29 @@ class ChotAccessibilityService : AccessibilityService() {
             }
             return
         }
-        claudeWindowSeen.set(true)
+        claudeWindowSeenAtMs.compareAndSet(0L, elapsed)
+
+        // After a press on Claude's widget, voice mode starts by itself: give it time, counted from when Claude's
+        // window appeared, before tapping anything
+        val tapAllowedAfterMs = if (viaWidget) claudeWindowSeenAtMs.get() + WIDGET_TAP_GRACE_MS else 180L
 
         for (root in roots) {
             // 1. Check if Claude is already in active Voice Mode UI
             if (isClaudeAlreadyInVoiceMode(root)) {
                 claudeAutoTapArmedEpochMs.set(0L)
-                ChotPrefs.appendLog(this, "Claude Voice Mode is active and listening (${elapsed}ms)")
+                // After a widget press, also log when Claude's window appeared, to tune WIDGET_OPEN_TIMEOUT_MS
+                val window = if (viaWidget) ", window at ${claudeWindowSeenAtMs.get()}ms" else ""
+                ChotPrefs.appendLog(this, "Claude Voice Mode is active and listening (${elapsed}ms$window)")
                 return
             }
+
+            if (elapsed < tapAllowedAfterMs) continue
 
             // 2. Search for the Voice Mode ("Voice Mode" / "Talk") button in Claude's accessibility tree
             val voiceButton = findClaudeVoiceModeButton(root) ?: continue
             if (tapVoiceButton(voiceButton)) return
         }
+        if (elapsed < tapAllowedAfterMs) return
 
         // Dump visible Claude nodes once at ~1200ms if no Voice Mode button has been tapped yet
         if (elapsed >= 1200L && !diagnosticTreeDumped.getAndSet(true)) {
@@ -335,9 +349,23 @@ class ChotAccessibilityService : AccessibilityService() {
         if (elapsed >= 1600L && ChotPrefs.isCoordinateFallbackEnabled(this) &&
             !coordinateFallbackScheduled.getAndSet(true)
         ) {
-            claudeAutoTapArmedEpochMs.set(0L)
-            dispatchCoordinateTap()
+            // A skipped tap leaves the auto-tap armed: the Voice button can still show up before the 6s limit
+            if (dispatchCoordinateTap(roots)) {
+                claudeAutoTapArmedEpochMs.set(0L)
+            }
         }
+    }
+
+    /**
+     * The widget press didn't bring Claude up, for example because the system blocked the launch: start Claude the
+     * usual way and let the auto-tap find the Voice button.
+     */
+    private fun launchClaudeAfterWidgetPress(elapsed: Long) {
+        ChotPrefs.appendLog(this, "Claude didn't open ${elapsed}ms after the widget press: launching it directly")
+        val target = ClaudeLauncher.launchClaude(this, ChotPrefs.getLaunchMode(this))
+        ChotPrefs.appendLog(this, "Launched $target")
+        // The poll that called this keeps running, so don't start another one
+        arm(viaWidget = false, startPolling = false)
     }
 
     /**
@@ -403,7 +431,14 @@ class ChotAccessibilityService : AccessibilityService() {
 
     private fun collectNodeSummary(node: AccessibilityNodeInfo, depth: Int, out: MutableList<String>) {
         if (depth > 40 || out.size >= 25) return
-        val t = node.text?.toString()?.trim().orEmpty()
+        val rawText = node.text?.toString().orEmpty()
+        // A text box's text is the owner's draft: log only that there is one, not what it says. Untrimmed, so a
+        // draft of only spaces or newlines shows up too.
+        val t = if (node.isEditable && rawText.isNotEmpty() && !node.isShowingHintText) {
+            "<draft, ${rawText.length} chars>"
+        } else {
+            rawText.trim()
+        }
         val d = node.contentDescription?.toString()?.trim().orEmpty()
         val id = node.viewIdResourceName?.substringAfterLast('/')?.trim().orEmpty()
         if (t.isNotEmpty() || d.isNotEmpty() || id.isNotEmpty() || node.isClickable) {
@@ -492,15 +527,81 @@ class ChotAccessibilityService : AccessibilityService() {
         return false
     }
 
-    private fun dispatchCoordinateTap() {
+    /**
+     * Taps the configured spot, but only where it can't hit anything other than an unlabeled Voice button: with a
+     * draft in Claude's text box, Send sits exactly there, and in a Claude Code session it can be Stop.
+     * Returns false if it skipped the tap.
+     */
+    private fun dispatchCoordinateTap(claudeRoots: List<AccessibilityNodeInfo>): Boolean {
         val dm = resources.displayMetrics
         val x = dm.widthPixels * ChotPrefs.getTapXPercent(this)
         val y = dm.heightPixels * ChotPrefs.getTapYPercent(this)
+        val point = "(${x.toInt()}, ${y.toInt()})"
+
+        if (isKeyboardAt(x.toInt(), y.toInt())) {
+            ChotPrefs.appendLog(this, "Coordinate fallback skipped: the keyboard covers $point")
+            return false
+        }
+        val target = claudeRoots.firstNotNullOfOrNull { findClickableAt(it, x.toInt(), y.toInt()) }
+        val label = target?.let { describeLabel(it) }.orEmpty()
+        if (target != null && label.isNotEmpty() && findClaudeVoiceModeButton(target) == null) {
+            ChotPrefs.appendLog(this, "Coordinate fallback skipped: $point is on '$label'")
+            return false
+        }
+
         val ok = dispatchTapGesture(x, y)
-        ChotPrefs.appendLog(
-            this,
-            "Coordinate fallback tap at (${x.toInt()}, ${y.toInt()}) -> $ok"
-        )
+        ChotPrefs.appendLog(this, "Coordinate fallback tap at $point -> $ok")
+        return true
+    }
+
+    private fun isKeyboardAt(x: Int, y: Int): Boolean {
+        return try {
+            windows?.any { win ->
+                if (win.type != AccessibilityWindowInfo.TYPE_INPUT_METHOD) return@any false
+                val r = Rect()
+                win.getBoundsInScreen(r)
+                r.contains(x, y)
+            } == true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** The smallest clickable node under (x, y). */
+    private fun findClickableAt(node: AccessibilityNodeInfo, x: Int, y: Int, depth: Int = 0): AccessibilityNodeInfo? {
+        if (depth > 40) return null
+        val r = Rect()
+        node.getBoundsInScreen(r)
+        if (!r.contains(x, y)) return null
+        for (i in 0 until node.childCount) {
+            val child = try {
+                node.getChild(i)
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            findClickableAt(child, x, y, depth + 1)?.let { return it }
+        }
+        return if (node.isClickable) node else null
+    }
+
+    /**
+     * A node's own label, or the first one inside it (Claude puts the Voice button's label on a child). A text box
+     * counts as labeled but is never quoted, so the owner's draft stays out of the log.
+     */
+    private fun describeLabel(node: AccessibilityNodeInfo, depth: Int = 0): String? {
+        if (depth > 6) return null
+        if (node.isEditable) return "text box"
+        val own = (node.contentDescription ?: node.text)?.toString()?.trim()
+        if (!own.isNullOrEmpty()) return own
+        for (i in 0 until node.childCount) {
+            val child = try {
+                node.getChild(i)
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            describeLabel(child, depth + 1)?.let { return it }
+        }
+        return null
     }
 
     private fun dispatchTapGesture(x: Float, y: Float): Boolean {
@@ -524,22 +625,38 @@ class ChotAccessibilityService : AccessibilityService() {
         private val coordinateFallbackScheduled = AtomicBoolean(false)
         private val diagnosticTreeDumped = AtomicBoolean(false)
         private val offScreenRetryLogged = AtomicBoolean(false)
-        private val claudeWindowSeen = AtomicBoolean(false)
+        // Milliseconds after arming when Claude's window first showed up, 0 until it does
+        private val claudeWindowSeenAtMs = AtomicLong(0L)
         private val claudeWindowLossLogged = AtomicBoolean(false)
+        private val launchedViaWidget = AtomicBoolean(false)
 
         private const val FOLLOW_UP_BACK_DELAY_MS = 300L
 
+        // After a press on Claude's widget: how long Claude gets to open before chot launches it directly (a cold
+        // start can take a while), and how long its window gets to enter voice mode before chot looks for the Voice
+        // button
+        private const val WIDGET_OPEN_TIMEOUT_MS = 3000L
+        private const val WIDGET_TAP_GRACE_MS = 2000L
+
         /** Called right after every Claude launch, so it also records the launch time for the follow-up BACK. */
-        fun armClaudeVoiceAutoTap() {
+        fun armClaudeVoiceAutoTap() = arm(viaWidget = false)
+
+        /** Called right after pressing the Voice chat button on chot's copy of Claude's widget. */
+        fun armAfterWidgetPress() = arm(viaWidget = true)
+
+        private fun arm(viaWidget: Boolean, startPolling: Boolean = true) {
             coordinateFallbackScheduled.set(false)
             diagnosticTreeDumped.set(false)
             offScreenRetryLogged.set(false)
-            claudeWindowSeen.set(false)
+            claudeWindowSeenAtMs.set(0L)
             claudeWindowLossLogged.set(false)
+            launchedViaWidget.set(viaWidget)
             val now = System.currentTimeMillis()
             lastClaudeLaunchEpochMs.set(now)
             claudeAutoTapArmedEpochMs.set(now)
-            instance?.scheduleAutoTapPoll(100L)
+            if (startPolling) {
+                instance?.scheduleAutoTapPoll(100L)
+            }
         }
 
         private val GOOGLE_ASSISTANT_PACKAGES = setOf(

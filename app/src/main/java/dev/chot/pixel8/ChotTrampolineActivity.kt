@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.View
 import android.view.WindowManager
 
 class ChotTrampolineActivity : Activity() {
@@ -72,6 +73,8 @@ class ChotTrampolineActivity : Activity() {
 
         // 3. Poll activeRecordingConfigurations (every 20ms, up to 340ms max) until Google releases the mic
         val maxWaitMs = 340L
+        var voiceChatButton: View? = null
+        var widgetLayoutMs = -1L
         fun checkMicAndLaunch() {
             val elapsed = System.currentTimeMillis() - startTime
             val activeConfigs = try {
@@ -91,17 +94,24 @@ class ChotTrampolineActivity : Activity() {
             } catch (_: Exception) {
             }
 
-            val mode = ChotPrefs.getLaunchMode(this@ChotTrampolineActivity)
-            val launchedTarget = ClaudeLauncher.launchClaude(this@ChotTrampolineActivity, mode)
+            // Claude's widget starts voice mode by itself; without it, launch Claude and let the auto-tapper find
+            // the Voice button
+            val button = voiceChatButton
+            val launchedTarget = if (button != null && button.performClick()) {
+                ChotAccessibilityService.armAfterWidgetPress()
+                "Claude widget's Voice chat button (widget laid out in ${widgetLayoutMs}ms)"
+            } else {
+                val mode = ChotPrefs.getLaunchMode(this@ChotTrampolineActivity)
+                val target = ClaudeLauncher.launchClaude(this@ChotTrampolineActivity, mode)
+                ChotAccessibilityService.armClaudeVoiceAutoTap()
+                target
+            }
             val totalMs = System.currentTimeMillis() - startTime
 
             ChotPrefs.appendLog(
                 this@ChotTrampolineActivity,
                 "[$triggerSource] Mic freed in ${totalMs}ms -> Launched $launchedTarget"
             )
-
-            // Arm the AccessibilityService Voice Mode auto-tapper if enabled
-            ChotAccessibilityService.armClaudeVoiceAutoTap()
 
             finish()
             @Suppress("DEPRECATION")
@@ -110,6 +120,13 @@ class ChotTrampolineActivity : Activity() {
 
         // Wait 45ms initially so GLOBAL_ACTION_BACK + AudioFocus loss propagate to Google's audio thread
         handler.postDelayed({ checkMicAndLaunch() }, 45L)
+
+        // Lay out Claude's widget during that wait, so pressing its button later costs nothing
+        if (ChotPrefs.getLaunchMode(this) == LaunchMode.AUTO_ASSIST_AND_VOICE_TAP) {
+            val layoutStart = System.currentTimeMillis()
+            voiceChatButton = ClaudeWidget.findVoiceChatButton(this)
+            widgetLayoutMs = System.currentTimeMillis() - layoutStart
+        }
     }
 
     companion object {

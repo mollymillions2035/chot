@@ -1,5 +1,6 @@
 package dev.chot.pixel8
 
+import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.SharedPreferences
 import java.text.SimpleDateFormat
@@ -36,6 +37,7 @@ object ChotPrefs {
     private const val KEY_TAP_Y_PCT = "tap_y_pct"
     private const val KEY_COOLDOWN_MS = "cooldown_ms"
     private const val KEY_LOGS = "event_logs"
+    private const val KEY_CLAUDE_WIDGET_ID = "claude_widget_id"
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -90,6 +92,13 @@ object ChotPrefs {
 
     fun setCooldownMs(context: Context, ms: Long) {
         prefs(context).edit().putLong(KEY_COOLDOWN_MS, ms.coerceIn(800L, 10000L)).apply()
+    }
+
+    fun getClaudeWidgetId(context: Context): Int =
+        prefs(context).getInt(KEY_CLAUDE_WIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
+
+    fun setClaudeWidgetId(context: Context, id: Int) {
+        prefs(context).edit().putInt(KEY_CLAUDE_WIDGET_ID, id).apply()
     }
 
     @Synchronized
