@@ -60,15 +60,15 @@ adb shell dumpsys deviceidle whitelist "+$PKG" >/dev/null 2>&1 || true
 adb shell cmd appops set "$PKG" RUN_IN_BACKGROUND allow || true
 adb shell cmd appops set "$PKG" RUN_ANY_IN_BACKGROUND allow || true
 
-echo "==> 4/6 Ensuring Google remains Default Digital Assistant so Pixel 8 Tensor G3 'Hey Google' DSP stays active..."
+# Only checks: the default assistant is the user's choice, so the script never changes it
+echo "==> 4/6 Checking that Google is the Default Digital Assistant so Pixel 8 Tensor G3 'Hey Google' DSP stays active..."
 CURRENT_VIS="$(adb shell settings get secure voice_interaction_service | tr -d '\r')"
-if [[ "$CURRENT_VIS" != *"googlequicksearchbox"* ]]; then
-    GSA_VIS="com.google.android.googlequicksearchbox/com.google.android.voiceinteraction.GsaVoiceInteractionService"
-    adb shell settings put secure voice_interaction_service "$GSA_VIS"
-    adb shell settings put secure assistant "com.google.android.googlequicksearchbox/com.google.android.apps.gsa.staticplugins.opa.OpaActivity"
-    echo "    Restored Google VoiceInteractionService ($GSA_VIS) for hardware DSP hotword."
+if [[ "$CURRENT_VIS" == *"googlequicksearchbox"* ]]; then
+    echo "    Google is the default assistant ($CURRENT_VIS)."
 else
-    echo "    Google VoiceInteractionService already active ($CURRENT_VIS)."
+    echo "    WARNING: Google is not the default assistant (voice_interaction_service: ${CURRENT_VIS:-none})."
+    echo "    \"Hey Google\" only reaches Chot while Google (Gemini) is the default digital assistant. Set it on the phone:"
+    echo "    Settings > Apps > Default apps > Digital assistant app > Google (Gemini)"
 fi
 
 echo "==> 5/6 Enabling ChotAccessibilityService automatically..."
