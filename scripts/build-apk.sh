@@ -76,7 +76,7 @@ fi
 # 4. Write local.properties and build the APK
 echo "sdk.dir=$SDK_DIR" > "$PROJECT_DIR/local.properties"
 
-echo "==> Building Chot APK..."
+echo "==> Building chot APK..."
 cd "$PROJECT_DIR"
 "$GRADLE_BIN" assembleDebug --no-daemon
 

@@ -57,7 +57,7 @@ class MainActivity : Activity() {
 
         // Header
         root.addView(TextView(this).apply {
-            text = "CHOT // PIXEL 8"
+            text = "chot // PIXEL 8"
             setTextColor(Color.parseColor("#D97757"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
@@ -116,7 +116,7 @@ class MainActivity : Activity() {
                 if (tryAutoEnableAccessibilityService()) {
                     Toast.makeText(
                         this,
-                        "Auto-enabled Chot Accessibility Service via WRITE_SECURE_SETTINGS!",
+                        "Auto-enabled chot Accessibility Service via WRITE_SECURE_SETTINGS!",
                         Toast.LENGTH_SHORT
                     ).show()
                     refreshStatusAndLogs()
@@ -340,14 +340,14 @@ class MainActivity : Activity() {
         }
         statusContainer.addView(statusRow("Pixel 8 Hardware DSP (\"Hey Google\")", isGoogleDefault, assistantMsg))
 
-        // 3. Check Chot Accessibility Service
+        // 3. Check chot Accessibility Service
         val isAccessEnabled = isAccessibilityServiceEnabled()
         val accessMsg = if (isAccessEnabled) {
             "Active & watching for \"Hey Google\" overlay + Claude Voice handover"
         } else {
-            "DISABLED — Tap '1. Enable Accessibility' below and turn on Chot"
+            "DISABLED — Tap '1. Enable Accessibility' below and turn on chot"
         }
-        statusContainer.addView(statusRow("Chot Accessibility Interceptor", isAccessEnabled, accessMsg))
+        statusContainer.addView(statusRow("chot Accessibility Interceptor", isAccessEnabled, accessMsg))
 
         // 4. Check Overlay Permission (Android 14/15/16 Background Activity Launch exemption)
         val hasOverlay = Settings.canDrawOverlays(this)
