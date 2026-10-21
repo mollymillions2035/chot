@@ -35,9 +35,11 @@ echo "[chot-daemon] Listening for Pixel 8 Tensor G3 DSP hotword events..."
 
 LAST_TRIGGER=0
 logcat -c
-logcat -v brief VoiceInteractionManagerService:I SoundTriggerMiddlewareLogging:I HotwordDetectionService:I ActivityTaskManager:I *:S | while IFS= read -r line; do
+# "onDetected" comes from the hotword detector of the default assistant itself, so other on-device sound models
+# (Now Playing etc.) never produce it, unlike SoundTriggerMiddlewareLogging recognitions
+logcat -v brief AlwaysOnHotwordDetector:I ActivityTaskManager:I *:S | while IFS= read -r line; do
     case "$line" in
-        *"VoiceInteractionManagerService"*"showSession"*|*"SoundTriggerMiddlewareLogging"*"onRecognition"*|*"VoicePlateActivity"*|*"RobinVoicePlateActivity"*)
+        "I/AlwaysOnHotwordDetector("*"): onDetected"|*"VoicePlateActivity"*|*"RobinVoicePlateActivity"*)
             NOW=$(date +%s)
             if [ $((NOW - LAST_TRIGGER)) -lt 3 ]; then
                 continue

@@ -254,7 +254,7 @@ class MainActivity : Activity() {
         val testBtn = styledButton("⚡ Test Hotword Handover → Launch Claude Voice Now", "#D97757") {
             val svc = ChotAccessibilityService.instance
             if (svc != null) {
-                svc.triggerIntercept("Manual-UI-Test", bypassCooldown = true)
+                svc.triggerIntercept("Manual-UI-Test", manual = true)
             } else {
                 val intent = Intent(this, ChotTrampolineActivity::class.java).apply {
                     putExtra(ChotTrampolineActivity.EXTRA_TRIGGER_SOURCE, "Manual-Trampoline-Test")

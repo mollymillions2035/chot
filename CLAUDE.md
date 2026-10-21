@@ -4,14 +4,17 @@ Hardware DSP hotword bridge: intercepts "Hey Google" on a stock Pixel 8 and hand
 
 ## Known issues (ultrareview, 2026-10-20)
 
-Not yet checked against the code or fixed. All rated normal severity.
+Issues 1–5 are fixed (2026-10-21). Issues 6–11 are not yet checked against the code or fixed. All rated normal severity.
 
-### Intercepting things the user didn't ask for
-1. **Opening the Gemini app by hand gets intercepted.** `ASSISTANT_OVERLAY_CLASSES` matches the whole `com.google.android.apps.bard` package, and `hasActiveVoiceInteractionWindow()` matches any window titled "Gemini". Only the voice overlay should match. `ChotAccessibilityService.kt:132`, `:581`.
-2. **Manual Google voice search gets intercepted.** `hasActiveVoiceInteractionWindow()` (step 2) runs before the `NORMAL_SEARCH_CLASSES` exclusion (step 3), so the search-bar mic gets hijacked. `ChotAccessibilityService.kt:89`.
-3. **Other on-device sound models count as "Hey Google".** Any `SoundTriggerMiddlewareLogging … onRecognition` line counts, including Now Playing and Quick Phrases. Filter on the hotword model or VIMS instead. The same match is in `scripts/pixel8-instant-adb-daemon.sh`. `ChotAccessibilityService.kt:277`.
-4. **The logcat fast path presses BACK in the wrong app.** It sends BACK before the Assistant overlay exists, so the user's current app gets BACK. The 2.5s cooldown then stops the overlay from being dismissed. Send BACK only once the Assistant window is confirmed. `ChotAccessibilityService.kt:204`.
-5. **The pause switch doesn't stop the mic callback path.** That path skips the `ChotPrefs.isEnabled` check. Move the check into `triggerIntercept`. `ChotAccessibilityService.kt:37-45`.
+### Intercepting things the user didn't ask for (fixed, not yet verified on a device)
+The fixes rest on AOSP 14–17 source and public captures of the Google app, not on a test on the Pixel 8.
+1. **Opening the Gemini app by hand gets intercepted.** Fixed. Only the overlay matches now: Gemini's `…robin.ui.floaty.activity.FloatyActivity` (by class, or its `assistant_robin_floaty_root_container` root view), or classic Assistant's `VoiceInteractionSession` window, which accessibility reports as window type -1 (never `TYPE_SYSTEM`). The full Gemini app is `…robin.main.MainActivity` in the Google app, which the old `com.google.android.apps.search.assistant` token and `:id/assistant_` view ids also matched; both are gone, along with the bard package token and the "Gemini" title match.
+2. **Manual Google voice search gets intercepted.** Fixed. The `NORMAL_SEARCH_CLASSES` exclusion runs before any overlay check, and the "Listening…" / "Ask Gemini" text heuristics that matched voice search and the Gemini app are gone.
+3. **Other on-device sound models count as "Hey Google".** Fixed in the APK and the daemon. Both key on `I/AlwaysOnHotwordDetector: onDetected`, which only the default assistant's hotword detector logs. The old matches were dead on Android 14+ anyway: VIMS logs under `VoiceInteractionManager` and nothing at INFO, and SoundTrigger prints `RECOGNITION (`, not `onRecognition`.
+4. **The logcat fast path presses BACK in the wrong app.** Fixed. A logcat hit (`onDetected`, or the `FloatyActivity` START line) only starts a 2s poll; BACK and the cooldown happen once the overlay is on screen.
+5. **The pause switch doesn't stop the mic callback path.** Fixed. `triggerIntercept` checks `ChotPrefs.isEnabled`. The Test button (`manual = true`) still runs while paused and sends no BACK.
+
+To verify on the Pixel 8: `adb logcat -v brief -s AlwaysOnHotwordDetector ActivityTaskManager` while saying "Hey Google" should show `onDetected` and a `FloatyActivity` START, and `adb shell uiautomator dump` of the overlay should contain `assistant_robin_floaty_root_container`. Opening Gemini by hand, the search-bar mic and Now Playing should log no intercept.
 
 ### Setup and edge cases
 6. **Locked phone drops the request.** `requestDismissKeyguard(this, null)` doesn't wait for the unlock, so Claude launches behind the keyguard and the auto-tap times out. Launch from `onDismissSucceeded`. `ChotTrampolineActivity.kt:36`.
