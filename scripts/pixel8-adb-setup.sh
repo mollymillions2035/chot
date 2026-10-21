@@ -49,8 +49,7 @@ adb install -r "$APK_PATH"
 PKG="dev.chot.pixel8"
 SVC="$PKG/$PKG.ChotAccessibilityService"
 
-echo "==> 2/6 Granting privileged ADB permissions (READ_LOGS, WRITE_SECURE_SETTINGS, SYSTEM_ALERT_WINDOW, Claude RECORD_AUDIO)..."
-adb shell pm grant "$PKG" android.permission.READ_LOGS || true
+echo "==> 2/6 Granting privileged ADB permissions (WRITE_SECURE_SETTINGS, SYSTEM_ALERT_WINDOW, Claude RECORD_AUDIO)..."
 adb shell pm grant "$PKG" android.permission.WRITE_SECURE_SETTINGS || true
 adb shell appops set "$PKG" SYSTEM_ALERT_WINDOW allow || true
 adb shell pm grant com.anthropic.claude android.permission.RECORD_AUDIO 2>/dev/null || true

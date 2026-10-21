@@ -4,19 +4,15 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Path
 import android.graphics.Rect
 import android.media.AudioManager
 import android.media.AudioRecordingConfiguration
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -25,16 +21,6 @@ class ChotAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private val lastInterceptEpochMs = AtomicLong(0L)
     private val isMicRecordingActive = AtomicBoolean(false)
-
-    // Until when (uptime) a logcat hotword hint keeps polling for the Assistant overlay (0 = not polling)
-    private val logcatHintDeadlineUptimeMs = AtomicLong(0L)
-    private val logcatHintPoll = Runnable { pollForOverlayAfterLogcatHint() }
-
-    @Volatile
-    private var logcatThread: Thread? = null
-
-    @Volatile
-    private var logcatProcess: Process? = null
 
     private val audioRecordingCallback = object : AudioManager.AudioRecordingCallback() {
         override fun onRecordingConfigChanged(configs: List<AudioRecordingConfiguration>) {
@@ -57,13 +43,10 @@ class ChotAccessibilityService : AccessibilityService() {
 
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         audioManager.registerAudioRecordingCallback(audioRecordingCallback, handler)
-
-        startLogcatDspWatcherIfPermitted()
     }
 
     override fun onDestroy() {
         instance = null
-        stopLogcatDspWatcher()
         try {
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             audioManager.unregisterAudioRecordingCallback(audioRecordingCallback)
@@ -155,7 +138,7 @@ class ChotAccessibilityService : AccessibilityService() {
      * no BACK because there is no overlay to dismiss.
      */
     fun triggerIntercept(source: String, manual: Boolean = false) {
-        // Every automatic path (window events, mic callback, logcat) ends up here, so the pause switch is checked here
+        // Every automatic path (window events, mic callback) ends up here, so the pause switch is checked here
         if (!manual && !ChotPrefs.isEnabled(this)) return
 
         val now = System.currentTimeMillis()
@@ -165,7 +148,6 @@ class ChotAccessibilityService : AccessibilityService() {
             return
         }
         lastInterceptEpochMs.set(now)
-        logcatHintDeadlineUptimeMs.set(0L)
 
         if (!manual) {
             // Step 1: Dismiss Google Assistant / Gemini overlay immediately
@@ -201,101 +183,6 @@ class ChotAccessibilityService : AccessibilityService() {
             ClaudeLauncher.launchClaude(this, ChotPrefs.getLaunchMode(this))
             armClaudeVoiceAutoTap()
         }
-    }
-
-    /**
-     * Optional Hardware DSP Fast-Path:
-     * If `adb shell pm grant dev.chot.pixel8 android.permission.READ_LOGS` has been granted,
-     * tails filtered logcat tags (`AlwaysOnHotwordDetector`, `ActivityTaskManager`) so we know "Hey Google"
-     * fired before the Google UI even finishes inflating. A hit is only a hint: see [onLogcatHotwordHint].
-     */
-    fun startLogcatDspWatcherIfPermitted() {
-        if (checkSelfPermission(android.Manifest.permission.READ_LOGS) != PackageManager.PERMISSION_GRANTED) {
-            return
-        }
-        if (logcatThread?.isAlive == true) return
-
-        val thread = Thread({
-            try {
-                // Clear old buffer lines by only tailing from the last 1 line (-T 1)
-                val cmd = arrayOf(
-                    "logcat",
-                    "-v", "brief",
-                    "-T", "1",
-                    "AlwaysOnHotwordDetector:I",
-                    "ActivityTaskManager:I",
-                    "*:S"
-                )
-                val proc = Runtime.getRuntime().exec(cmd)
-                logcatProcess = proc
-                val reader = BufferedReader(InputStreamReader(proc.inputStream))
-                var line: String? = null
-                while (!Thread.currentThread().isInterrupted && reader.readLine().also { line = it } != null) {
-                    val l = line?.trimEnd() ?: continue
-                    if (!ChotPrefs.isEnabled(this@ChotAccessibilityService)) continue
-
-                    // - "onDetected" is logged by the default assistant's own hotword detector, so generic sound
-                    //   models (Now Playing etc.) can't produce it; Quick Phrases might, hence the overlay check.
-                    //   SoundTriggerMiddlewareLogging can't tell models apart, and VoiceInteractionManagerService
-                    //   logs nothing at INFO for a session.
-                    // - The START line is Gemini's overlay activity being launched (not the full Gemini app).
-                    val isDspHotword =
-                        (l.startsWith("I/AlwaysOnHotwordDetector(") && l.endsWith("): onDetected")) ||
-                            (l.startsWith("I/ActivityTaskManager(") && l.contains("START u0") &&
-                                l.contains("cmp=$GEMINI_OVERLAY_COMPONENT"))
-
-                    if (isDspHotword) {
-                        handler.post {
-                            onLogcatHotwordHint()
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-            }
-        }, "Chot-DSP-LogcatWatcher")
-        thread.isDaemon = true
-        thread.start()
-        logcatThread = thread
-    }
-
-    /**
-     * Logcat lines arrive before the Assistant overlay exists, so BACK right away would land in the user's app.
-     * Poll for the overlay instead and intercept once it is confirmed; hints that never produce one (a rejected
-     * hotword, or an intercept that already happened) expire on their own.
-     */
-    private fun onLogcatHotwordHint() {
-        logcatHintDeadlineUptimeMs.set(SystemClock.uptimeMillis() + LOGCAT_HINT_CONFIRM_WINDOW_MS)
-        // Restart rather than stack polls when hints arrive back to back (onDetected, then the START line)
-        handler.removeCallbacks(logcatHintPoll)
-        handler.post(logcatHintPoll)
-    }
-
-    private fun pollForOverlayAfterLogcatHint() {
-        val deadline = logcatHintDeadlineUptimeMs.get()
-        if (deadline == 0L) return
-        if (SystemClock.uptimeMillis() >= deadline) {
-            logcatHintDeadlineUptimeMs.set(0L)
-            // Logged so the overlay matchers can be checked on the device
-            ChotPrefs.appendLog(this, "DSP-Logcat hint expired: no Assistant overlay appeared")
-            return
-        }
-        if (hasActiveVoiceInteractionWindow()) {
-            logcatHintDeadlineUptimeMs.set(0L)
-            triggerIntercept("DSP-Logcat")
-            return
-        }
-        handler.postDelayed(logcatHintPoll, LOGCAT_HINT_POLL_MS)
-    }
-
-    private fun stopLogcatDspWatcher() {
-        handler.removeCallbacks(logcatHintPoll)
-        try {
-            logcatProcess?.destroy()
-            logcatThread?.interrupt()
-        } catch (_: Exception) {
-        }
-        logcatProcess = null
-        logcatThread = null
     }
 
     /**
@@ -567,15 +454,11 @@ class ChotAccessibilityService : AccessibilityService() {
         // (…voice.robin.main.MainActivity), and the com.google.android.apps.bard app is only a launcher shell for it.
         private const val GEMINI_OVERLAY_ACTIVITY =
             "com.google.android.apps.search.assistant.surfaces.voice.robin.ui.floaty.activity.FloatyActivity"
-        private const val GEMINI_OVERLAY_COMPONENT = "com.google.android.googlequicksearchbox/$GEMINI_OVERLAY_ACTIVITY"
         private const val GEMINI_OVERLAY_ROOT_VIEW_ID =
             "com.google.android.googlequicksearchbox:id/assistant_robin_floaty_root_container"
 
         // AccessibilityWindowManager maps WindowManager's TYPE_VOICE_INTERACTION to no AccessibilityWindowInfo type
         private const val VOICE_INTERACTION_WINDOW_TYPE = -1
-
-        private const val LOGCAT_HINT_CONFIRM_WINDOW_MS = 2000L
-        private const val LOGCAT_HINT_POLL_MS = 40L
 
         private val ASSISTANT_OVERLAY_CLASSES = listOf(
             GEMINI_OVERLAY_ACTIVITY,
