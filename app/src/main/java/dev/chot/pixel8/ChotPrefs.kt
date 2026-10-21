@@ -98,7 +98,7 @@ object ChotPrefs {
         val entry = "[$stamp] $message"
         val existing = prefs(context).getString(KEY_LOGS, "") ?: ""
         val lines = if (existing.isBlank()) emptyList() else existing.lines()
-        val updated = (listOf(entry) + lines).take(40).joinToString("\n")
+        val updated = (listOf(entry) + lines).take(100).joinToString("\n")
         prefs(context).edit().putString(KEY_LOGS, updated).apply()
     }
 
