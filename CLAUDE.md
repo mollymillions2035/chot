@@ -4,7 +4,7 @@ Hardware DSP hotword bridge: intercepts "Hey Google" on a stock Pixel 8 and hand
 
 ## Known issues (ultrareview, 2026-10-20)
 
-Open: 6, 8, 10, 11 and 14, all rated normal severity. Fixed issues keep their numbers and are listed separately below.
+Open: 6, 8, 10, 11, 14 and 15, all rated normal severity. Fixed issues keep their numbers and are listed separately below.
 
 ### Setup and edge cases
 - **6. Locked phone drops the request.** `requestDismissKeyguard(this, null)` doesn't wait for the unlock, so Claude launches behind the keyguard and the auto-tap times out. Launch from `onDismissSucceeded`. `ChotTrampolineActivity.kt:36`.
@@ -16,14 +16,19 @@ Open: 6, 8, 10, 11 and 14, all rated normal severity. Fixed issues keep their nu
 - **10. The daemon force-stops the Google app on every trigger.** `am force-stop com.google.android.googlequicksearchbox` tears down the VoiceInteractionService and hotword detector the bridge depends on, so the next "Hey Google" may not be detected. It also cancels Google's alarms and jobs. Drop it and rely on BACK, as the APK does. `pixel8-instant-adb-daemon.sh:72`.
 - **11. The daemon's ASSIST fallback never runs.** `tr -d " \r"` strips the spaces from "No activities found" before the `*"No activities"*` check, so that check can't match. Without a VOICE_ASSIST activity, the daemon opens Claude's main activity instead of the assistant overlay. Compare before stripping, or check for `/`. `pixel8-instant-adb-daemon.sh:28-29`.
 
-### Found while fixing 1–5
+### Found during phone tests
 - **14. Claude stays on its last screen when that was a Claude Code session.** Seen on the Pixel 8 (2026-10-21): if the Claude app last showed a Claude Code session, "Hey Google" opens Claude straight back into that session, and nothing switches to voice mode.
   - The launch goes `VOICE_ASSIST` → `AssistantOverlayActivity` → `AppOnlyMainActivity`, which restores the last screen.
   - That screen has no Voice button, so the auto-tap finds nothing. After 1.6s the coordinate fallback taps (88.4%, 93.1%) anyway, on whatever sits there in Claude Code; check what that hits.
   - Needs a launch that always lands on a chat, or a fallback that only taps when Claude's chat screen is showing. `ClaudeLauncher.kt:84`, `ChotAccessibilityService.kt:335`.
+- **15. Claude's keyboard hides the Voice button.** Seen on the Pixel 8 (`7553bff`, 2026-10-21): long-press power brought Claude back (`result=2`) with its text box focused and the keyboard up. The text box row sat at y≈1385 with 'Add files and more', 'Start speech input' (dictation, not voice mode) and 'Send', and no Voice button. The auto-tap found nothing, and the 1.6s coordinate fallback tapped (954, 2052), on the keyboard.
+  - **Owner's requirement:** voice mode has to start whether or not Claude's keyboard is showing. Not tapping isn't enough.
+  - Likely fix: when the Voice button is missing and the keyboard is up, hide the keyboard and stay armed, so the poll finds the Voice button once the text box settles. In the next try chot found the Voice button higher than usual, at [1203,1700][1329,1826], and voice mode started. That looks like the text box moving back down as the keyboard closed, which would mean the button comes back once the keyboard is gone (unconfirmed).
+  - To check on the phone first: whether the button comes back while the text box keeps focus; whether 'Send' means there was text in the box (then hiding the keyboard won't help, and chot must not clear the owner's draft); and how to hide the keyboard. BACK closes Claude if the keyboard is already gone by the time it arrives, the same race as 12; `SoftKeyboardController` doesn't have that problem.
+  - The coordinate fallback should never tap while the keyboard is up. `ChotAccessibilityService.kt` `handleClaudeWindowEvent`.
 
 ### Fixed
-Issues 1–5 (intercepting things the user didn't ask for), 7 and 9 were fixed on 2026-10-21. 12 and 13 were fixed later that day and haven't been checked on the phone yet. On the Pixel 8 the fixes for 1, 2, 5, 7 and 9 held. The fix for 7 removed the APK's logcat fast path, so 3 and 4 now only concern the daemon, which wasn't run on the phone, though the capture confirmed the log lines it keys on.
+Issues 1–5 (intercepting things the user didn't ask for), 7 and 9 were fixed on 2026-10-21. 12 and 13 were fixed later that day. On the Pixel 8 the fixes for 1, 2, 5, 7, 9 and 12 held, and so did 13 as far as the test reached it. The fix for 7 removed the APK's logcat fast path, so 3 and 4 now only concern the daemon, which wasn't run on the phone, though the capture confirmed the log lines it keys on.
 
 - **1. Opening the Gemini app by hand gets intercepted.** Fixed. The overlay checks now match only the overlay: Gemini's `…robin.ui.floaty.activity.FloatyActivity` (by class, or its `assistant_robin_floaty_root_container` root view), or classic Assistant's `VoiceInteractionSession` window, which accessibility reports as window type -1 (never `TYPE_SYSTEM`). The full Gemini app is `…robin.main.MainActivity` in the Google app, which the old `com.google.android.apps.search.assistant` token and `:id/assistant_` view ids also matched; both are gone, along with the bard package token and the "Gemini" title match. The older class-name tokens (`VoicePlate`, `RobinVoicePlate`, `RobinActivity`, `AssistantActivity`, `OpaActivity`, `ZeroState`, `LockscreenEntry`) are still there. Not all of them are classic-Assistant names: "Robin" is Gemini's codename. On the Pixel 8 none of them matched any Google activity seen. Anything else they might match is unverified.
 - **2. Manual Google voice search gets intercepted.** Fixed. Window-state events from `NORMAL_SEARCH_CLASSES` are excluded before any overlay check. What actually caught voice search was the "Listening…" text heuristic, which content events and the mic path reached without that exclusion; it is gone, along with "Ask Gemini", which matched the Gemini app.
@@ -44,6 +49,7 @@ Issues 1–5 (intercepting things the user didn't ask for), 7 and 9 were fixed o
   - chot logs every BACK with the window that had focus (`BACK sent (focus: …)`), and each skipped follow-up while the overlay is still listed. The auto-tap logs when Claude's window leaves the screen before voice mode, and when it gives up after 6s. If the logs show the follow-up never fires, it can go.
   - `ChotAccessibilityService.kt` `triggerIntercept`, `sendFollowUpBackIfOverlayFocused`.
   - **Possibly seen on the Pixel 8 (`3effbab`):** in 1 of 3 power-button tries, Claude was drawn fresh but chot logged no auto-tap, Claude flashed, and Settings came back. A second BACK landing in Claude would explain it, but the capture doesn't show BACKs, so this is unconfirmed. chot's log now would.
+  - **Checked on the Pixel 8 (`7553bff`):** 12 intercepts, 5 from long-press power and 7 from "Hey Google". Every first BACK went to the overlay (`focus: com.google.android.googlequicksearchbox 'Gemini'`). The follow-up BACK never went out; the overlay was still listed at 300ms only once, after Claude had launched. Claude never flashed and closed, and the first back gesture out of Claude always landed on Settings.
 - **13. Auto-tap could tap where the Voice button used to be, off screen.** Fixed. chot can find the Voice button while Claude's window is still sliding in from the right, so its bounds lie partly or wholly off the 1080-wide screen. ACTION_CLICK works there anyway, but a tap would miss, so taps now only go to bounds fully on screen (`isFullyOnScreen`, against the display's full bounds). `ChotAccessibilityService.kt` `tapVoiceButton`, `followUpVoiceButtonTap`.
   - The 380ms follow-up taps the button where it finds it then, not where it was at the first click.
   - If ACTION_CLICK fails while the button isn't fully on screen, chot doesn't tap and stays armed, so the 120ms poll retries with fresh bounds and the 1.6s coordinate fallback still applies. It logs `… is off screen and ACTION_CLICK failed: retrying` once per launch.
@@ -52,12 +58,14 @@ Issues 1–5 (intercepting things the user didn't ask for), 7 and 9 were fixed o
     - 954, 1109 and 1137 in the re-test when Claude started a fresh `AppOnlyMainActivity` (`START … result=0`).
     - 1999, 2030 and 2030 in the re-test, and 2016 and 1827 in the power-button test, each time Claude's existing task was brought to the front instead (`result=2`). That is up to about one screen width right of the settled spot.
   - In one of the `result=2` cases ACTION_CLICK failed (`action=false, gesture=true`), the gesture tap went off screen, and Claude never entered voice mode. The "sa" the owner then found in the launcher's app search was their own earlier search for Settings, which the launcher keeps; chot didn't type it.
+  - **Checked on the Pixel 8 (`7553bff`):** off-screen bounds still show up, with left edges of 1203 (twice, once with `result=0`) and 2029 (twice, `result=2`). ACTION_CLICK worked in all 11 auto-taps, so no tap went to those bounds, and the retry path wasn't exercised.
 
 Checked on the owner's Pixel 8 (Android 17, Google app 17.66.20) on 2026-10-21:
 - "Hey Google" from Settings opened Claude in voice mode 3 times out of 3, with no stray BACK (Settings stayed on the same screen).
 - Not intercepted: opening Gemini by hand, the search-bar mic, Now Playing firing, and "Hey Google" while paused.
 - Every intercept came through the accessibility path. The logcat fast path (see 7) and the daemon were not exercised.
 - Re-checked after the fix for 7 (`a568a5a`): chot caught 6 "Hey Google"s out of 6, all through the accessibility path (`AssistantActivity (FloatyActivity)` or `AssistantOverlayWindow`). Of the 3 tries watched closely, 2 entered voice mode and left Settings where it was; the third didn't enter voice mode (see 13).
+- Re-checked after the fixes for 12 and 13 (`7553bff`): 12 triggers and 12 intercepts, with no extra ones. Of the 11 tries the owner ran from Settings, 10 entered voice mode and left Settings where it was; the other hit 15.
 
 ## What the Pixel 8 does (Android 17, Google app 17.66.20)
 For future matching work:
@@ -72,3 +80,4 @@ For future matching work:
   - chot's own log (intercepts, BACKs, auto-taps; the last 100 lines) is in its prefs: `adb shell run-as dev.chot.pixel8 cat shared_prefs/chot_pixel8_prefs.xml`. `run-as` works because `build-apk.sh` builds the debug APK.
   - `adb logcat -v time ActivityTaskManager:I AlwaysOnHotwordDetector:I *:S` shows each hotword, the overlay, the trampoline and Claude's activities with timestamps.
   - On the owner's machine adb isn't on PATH; use `.toolchain/android-sdk/platform-tools/adb` in the clone.
+  - Leaving Claude in Recents doesn't guarantee `result=2`: backing out of Claude sometimes ends its activity, so the next launch starts it fresh. To force `result=0`, swipe Claude out of Recents.
