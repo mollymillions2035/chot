@@ -10,6 +10,7 @@ import android.media.AudioManager
 import android.media.AudioRecordingConfiguration
 import android.os.Handler
 import android.os.Looper
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -105,14 +106,16 @@ class ChotAccessibilityService : AccessibilityService() {
      *   AccessibilityWindowInfo has no constant for and reports as type -1 (not TYPE_SYSTEM).
      * - Gemini draws into FloatyActivity, a transparent activity window, identified by its overlay root view.
      */
-    private fun hasActiveVoiceInteractionWindow(): Boolean {
+    private fun hasActiveVoiceInteractionWindow(): Boolean = findVoiceInteractionWindow() != null
+
+    private fun findVoiceInteractionWindow(): AccessibilityWindowInfo? {
         return try {
-            windows?.any { win ->
+            windows?.firstOrNull { win ->
                 // Only these two window types can be the overlay; skip the root IPC for status bar, IME etc.
                 if (win.type != VOICE_INTERACTION_WINDOW_TYPE && win.type != AccessibilityWindowInfo.TYPE_APPLICATION) {
-                    return@any false
+                    return@firstOrNull false
                 }
-                val root = win.root ?: return@any false
+                val root = win.root ?: return@firstOrNull false
                 val pkg = root.packageName?.toString() ?: ""
                 if (pkg in GOOGLE_ASSISTANT_PACKAGES) {
                     win.type == VOICE_INTERACTION_WINDOW_TYPE ||
@@ -120,11 +123,64 @@ class ChotAccessibilityService : AccessibilityService() {
                 } else {
                     false
                 }
-            } == true
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * BACK goes through SystemUI and reaches whichever window has input focus when it arrives. If no window has
+     * focus yet (an activity is still starting), it waits for the next one, which can be Claude. So every BACK is
+     * logged with the window that had focus when it was sent. Only the window is looked up first; describing it
+     * means a round trip to its app, so that waits until the BACK is on its way.
+     */
+    private fun sendBack(label: String) {
+        val focused = findFocusedWindow()
+        val ok = try {
+            performGlobalAction(GLOBAL_ACTION_BACK)
         } catch (_: Exception) {
             false
         }
+        ChotPrefs.appendLog(this, "$label sent (focus: ${describeWindow(focused)}) -> $ok")
     }
+
+    /**
+     * Re-sends BACK only while the overlay still has input focus, so the BACK goes to the overlay and nowhere else,
+     * and only before Claude is launched: a BACK still in flight when Claude's window takes focus closes Claude.
+     */
+    private fun sendFollowUpBackIfOverlayFocused(interceptEpochMs: Long) {
+        val overlay = findVoiceInteractionWindow() ?: return
+        val delay = "${FOLLOW_UP_BACK_DELAY_MS}ms"
+        when {
+            lastClaudeLaunchEpochMs.get() >= interceptEpochMs ->
+                ChotPrefs.appendLog(this, "Overlay still on screen at $delay, Claude already launched: no follow-up BACK")
+            overlay.isFocused -> sendBack("Follow-up BACK")
+            else -> ChotPrefs.appendLog(
+                this,
+                "Overlay still on screen at $delay but not focused (focus: ${describeFocusedWindow()}): no follow-up BACK"
+            )
+        }
+    }
+
+    private fun findFocusedWindow(): AccessibilityWindowInfo? {
+        return try {
+            windows?.firstOrNull { it.isFocused }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun describeWindow(win: AccessibilityWindowInfo?): String {
+        if (win == null) return "none"
+        return try {
+            "${win.root?.packageName ?: "?"} '${win.title ?: ""}'"
+        } catch (_: Exception) {
+            "?"
+        }
+    }
+
+    private fun describeFocusedWindow(): String = describeWindow(findFocusedWindow())
 
     /**
      * Fires the intercept pipeline:
@@ -151,20 +207,11 @@ class ChotAccessibilityService : AccessibilityService() {
 
         if (!manual) {
             // Step 1: Dismiss Google Assistant / Gemini overlay immediately
-            try {
-                performGlobalAction(GLOBAL_ACTION_BACK)
-            } catch (_: Exception) {
-            }
+            sendBack("BACK")
 
-            // Follow-up check at 85ms: if the overlay is still lingering, dismiss again
-            handler.postDelayed({
-                if (hasActiveVoiceInteractionWindow()) {
-                    try {
-                        performGlobalAction(GLOBAL_ACTION_BACK)
-                    } catch (_: Exception) {
-                    }
-                }
-            }, 85L)
+            // Follow-up check: if the first BACK didn't dismiss the overlay, dismiss again, but only where it can't
+            // reach anything else
+            handler.postDelayed({ sendFollowUpBackIfOverlayFocused(now) }, FOLLOW_UP_BACK_DELAY_MS)
         }
 
         // Step 2: Launch transparent trampoline to force audio focus handover and launch Claude
@@ -230,6 +277,8 @@ class ChotAccessibilityService : AccessibilityService() {
         val elapsed = System.currentTimeMillis() - armedAt
         if (elapsed > 6000L) {
             claudeAutoTapArmedEpochMs.set(0L)
+            val seen = if (claudeWindowSeen.get()) "was seen" else "was never seen"
+            ChotPrefs.appendLog(this, "Auto-tap gave up after 6s, Claude's window $seen (focus: ${describeFocusedWindow()})")
             return
         }
 
@@ -244,7 +293,17 @@ class ChotAccessibilityService : AccessibilityService() {
         if (elapsed < 180L) return
 
         val roots = getClaudeRootNodes()
-        if (roots.isEmpty()) return
+        if (roots.isEmpty()) {
+            // Claude's window was up and is gone before voice mode started, e.g. closed by a stray BACK
+            if (claudeWindowSeen.get() && !claudeWindowLossLogged.getAndSet(true)) {
+                ChotPrefs.appendLog(
+                    this,
+                    "Claude's window left the screen at ${elapsed}ms before voice mode (focus: ${describeFocusedWindow()})"
+                )
+            }
+            return
+        }
+        claudeWindowSeen.set(true)
 
         for (root in roots) {
             // 1. Check if Claude is already in active Voice Mode UI
@@ -255,46 +314,11 @@ class ChotAccessibilityService : AccessibilityService() {
             }
 
             // 2. Search for the Voice Mode ("Voice Mode" / "Talk") button in Claude's accessibility tree
-            val voiceButton = findClaudeVoiceModeButton(root)
-            if (voiceButton != null) {
-                claudeAutoTapArmedEpochMs.set(0L)
-                val rect = Rect()
-                voiceButton.getBoundsInScreen(rect)
-                val label = voiceButton.contentDescription ?: voiceButton.text ?: voiceButton.className ?: "node"
-                val actionClicked = voiceButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                var gestureTapped = false
-                if (!actionClicked && !rect.isEmpty) {
-                    gestureTapped = dispatchTapGesture(rect.exactCenterX(), rect.exactCenterY())
-                }
-                ChotPrefs.appendLog(
-                    this,
-                    "Auto-tapped Voice button '$label' at ${rect.toShortString()} (action=$actionClicked, gesture=$gestureTapped)"
-                )
-
-                // Verify 380ms later: if ACTION_CLICK returned true but the Voice Mode button is still visible
-                // (Compose sometimes requires a physical touch event), tap its exact screen coordinates.
-                if (actionClicked && !rect.isEmpty) {
-                    val cx = rect.exactCenterX()
-                    val cy = rect.exactCenterY()
-                    handler.postDelayed({
-                        val currentRoots = getClaudeRootNodes()
-                        val stillNotInVoice = currentRoots.isNotEmpty() &&
-                            currentRoots.none { isClaudeAlreadyInVoiceMode(it) } &&
-                            currentRoots.any { findClaudeVoiceModeButton(it) != null }
-                        if (stillNotInVoice) {
-                            val tapOk = dispatchTapGesture(cx, cy)
-                            ChotPrefs.appendLog(
-                                this,
-                                "Follow-up gesture tap on Voice button at (${cx.toInt()}, ${cy.toInt()}) -> $tapOk"
-                            )
-                        }
-                    }, 380L)
-                }
-                return
-            }
+            val voiceButton = findClaudeVoiceModeButton(root) ?: continue
+            if (tapVoiceButton(voiceButton)) return
         }
 
-        // Dump visible Claude nodes once at ~1200ms if no Voice Mode button matched yet
+        // Dump visible Claude nodes once at ~1200ms if no Voice Mode button has been tapped yet
         if (elapsed >= 1200L && !diagnosticTreeDumped.getAndSet(true)) {
             val summary = mutableListOf<String>()
             for (root in roots) {
@@ -314,6 +338,67 @@ class ChotAccessibilityService : AccessibilityService() {
             claudeAutoTapArmedEpochMs.set(0L)
             dispatchCoordinateTap()
         }
+    }
+
+    /**
+     * Clicks the Voice Mode button. Right after launch Claude's window can still be sliding in, so the button's
+     * bounds can lie partly or wholly off screen. ACTION_CLICK works there anyway, but a tap would miss, so taps only
+     * go to bounds fully on screen. Returns false, leaving auto-tap armed so the next poll retries with fresh bounds,
+     * when ACTION_CLICK failed and the button isn't fully on screen yet.
+     */
+    private fun tapVoiceButton(voiceButton: AccessibilityNodeInfo): Boolean {
+        val rect = Rect()
+        voiceButton.getBoundsInScreen(rect)
+        val label = voiceButton.contentDescription ?: voiceButton.text ?: voiceButton.className ?: "node"
+        val actionClicked = voiceButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        if (!actionClicked && !isFullyOnScreen(rect)) {
+            if (!offScreenRetryLogged.getAndSet(true)) {
+                ChotPrefs.appendLog(
+                    this,
+                    "Voice button '$label' at ${rect.toShortString()} is off screen and ACTION_CLICK failed: retrying"
+                )
+            }
+            return false
+        }
+
+        claudeAutoTapArmedEpochMs.set(0L)
+        var gestureTapped = false
+        if (!actionClicked) {
+            gestureTapped = dispatchTapGesture(rect.exactCenterX(), rect.exactCenterY())
+        }
+        ChotPrefs.appendLog(
+            this,
+            "Auto-tapped Voice button '$label' at ${rect.toShortString()} (action=$actionClicked, gesture=$gestureTapped)"
+        )
+
+        // Verify 380ms later: if ACTION_CLICK returned true but the Voice Mode button is still visible
+        // (Compose sometimes requires a physical touch event), tap the button where it is now.
+        if (actionClicked) {
+            handler.postDelayed({ followUpVoiceButtonTap() }, 380L)
+        }
+        return true
+    }
+
+    private fun followUpVoiceButtonTap() {
+        val currentRoots = getClaudeRootNodes()
+        if (currentRoots.isEmpty() || currentRoots.any { isClaudeAlreadyInVoiceMode(it) }) return
+        val button = currentRoots.firstNotNullOfOrNull { findClaudeVoiceModeButton(it) } ?: return
+        val rect = Rect()
+        button.getBoundsInScreen(rect)
+        if (!isFullyOnScreen(rect)) {
+            ChotPrefs.appendLog(this, "Voice button still showing at ${rect.toShortString()}, off screen: no follow-up tap")
+            return
+        }
+        val tapOk = dispatchTapGesture(rect.exactCenterX(), rect.exactCenterY())
+        ChotPrefs.appendLog(
+            this,
+            "Follow-up gesture tap on Voice button at (${rect.centerX()}, ${rect.centerY()}) -> $tapOk"
+        )
+    }
+
+    private fun isFullyOnScreen(rect: Rect): Boolean {
+        val screen = getSystemService(WindowManager::class.java).maximumWindowMetrics.bounds
+        return !rect.isEmpty && screen.contains(rect)
     }
 
     private fun collectNodeSummary(node: AccessibilityNodeInfo, depth: Int, out: MutableList<String>) {
@@ -435,13 +520,25 @@ class ChotAccessibilityService : AccessibilityService() {
             private set
 
         private val claudeAutoTapArmedEpochMs = AtomicLong(0L)
+        private val lastClaudeLaunchEpochMs = AtomicLong(0L)
         private val coordinateFallbackScheduled = AtomicBoolean(false)
         private val diagnosticTreeDumped = AtomicBoolean(false)
+        private val offScreenRetryLogged = AtomicBoolean(false)
+        private val claudeWindowSeen = AtomicBoolean(false)
+        private val claudeWindowLossLogged = AtomicBoolean(false)
 
+        private const val FOLLOW_UP_BACK_DELAY_MS = 300L
+
+        /** Called right after every Claude launch, so it also records the launch time for the follow-up BACK. */
         fun armClaudeVoiceAutoTap() {
             coordinateFallbackScheduled.set(false)
             diagnosticTreeDumped.set(false)
-            claudeAutoTapArmedEpochMs.set(System.currentTimeMillis())
+            offScreenRetryLogged.set(false)
+            claudeWindowSeen.set(false)
+            claudeWindowLossLogged.set(false)
+            val now = System.currentTimeMillis()
+            lastClaudeLaunchEpochMs.set(now)
+            claudeAutoTapArmedEpochMs.set(now)
             instance?.scheduleAutoTapPoll(100L)
         }
 
