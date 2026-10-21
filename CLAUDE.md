@@ -4,7 +4,7 @@ Hardware DSP hotword bridge: intercepts "Hey Google" on a stock Pixel 8 and hand
 
 ## Known issues (ultrareview, 2026-10-20)
 
-Issues 1–5 are fixed (2026-10-21) and the APK's fixes were checked on the Pixel 8. Issues 6–12 are not yet checked against the code or fixed. All rated normal severity.
+Issues 1–5 are fixed (2026-10-21) and the APK's fixes were checked on the Pixel 8. Issues 6–13 are not yet checked against the code or fixed. All rated normal severity.
 
 ### Intercepting things the user didn't ask for (fixed)
 Checked on the owner's Pixel 8 (Android 17, Google app 17.66.20) on 2026-10-21:
@@ -41,3 +41,7 @@ What the Pixel 8 does (Android 17, Google app 17.66.20), for future matching wor
 
 ### Found while fixing 1–5
 12. **The 85ms follow-up BACK can double up.** `performGlobalAction(BACK)` on Pixel goes through SystemUI, so the first BACK may still be in flight at 85ms. The follow-up then sends a second one, which lands in the trampoline or the user's app. This is older than the fix for 1–5. Re-send only while the overlay window is still focused, after about 300ms, once timing has been measured on the device. `ChotAccessibilityService.kt` `triggerIntercept`.
+13. **Auto-tap can tap where the Voice button used to be, off screen.** On the Pixel 8, one auto-tap found the button at [1573,2217][1699,2343], off a 1080-wide screen, while Claude's window was still sliding in. ACTION_CLICK worked anyway, but neither fallback tap would have:
+   - The 380ms follow-up taps the bounds captured before, even though it has just looked the button up again.
+   - If ACTION_CLICK fails, Chot taps those bounds right away, with auto-tap already disarmed, so off-screen bounds mean no retry and no 1.6s coordinate fallback.
+   - Either way, Claude opens without entering voice mode. Tap the freshly found button's current bounds, never tap bounds outside the screen, and stay armed so the 120ms poll retries. `ChotAccessibilityService.kt:380`, `:398`.
