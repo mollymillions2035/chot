@@ -254,7 +254,7 @@ class MainActivity : Activity() {
         val testBtn = styledButton("⚡ Test Hotword Handover → Launch Claude Voice Now", "#D97757") {
             val svc = ChotAccessibilityService.instance
             if (svc != null) {
-                svc.triggerIntercept("Manual-UI-Test", bypassCooldown = true)
+                svc.triggerIntercept("Manual-UI-Test", manual = true)
             } else {
                 val intent = Intent(this, ChotTrampolineActivity::class.java).apply {
                     putExtra(ChotTrampolineActivity.EXTRA_TRIGGER_SOURCE, "Manual-Trampoline-Test")
@@ -363,9 +363,9 @@ class MainActivity : Activity() {
         val hasReadLogs = checkSelfPermission(android.Manifest.permission.READ_LOGS) ==
             PackageManager.PERMISSION_GRANTED
         val readLogsMsg = if (hasReadLogs) {
-            "GRANTED — Zero-latency (<15ms) SoundTrigger/VoiceInteraction DSP logcat sensor active"
+            "GRANTED — AlwaysOnHotwordDetector DSP logcat sensor active"
         } else {
-            "Optional (Standalone UI mode active). For <15ms DSP fast-path run:\nadb shell pm grant dev.chot.pixel8 android.permission.READ_LOGS"
+            "Optional (Standalone UI mode active). For the DSP logcat fast-path run:\nadb shell pm grant dev.chot.pixel8 android.permission.READ_LOGS"
         }
         statusContainer.addView(statusRow("Hardware DSP Logcat Fast-Path", hasReadLogs, readLogsMsg))
 

@@ -11,6 +11,7 @@ import android.media.AudioManager
 import android.media.AudioRecordingConfiguration
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -24,7 +25,10 @@ class ChotAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private val lastInterceptEpochMs = AtomicLong(0L)
     private val isMicRecordingActive = AtomicBoolean(false)
-    private val lastMicStartEpochMs = AtomicLong(0L)
+
+    // Until when (uptime) a logcat hotword hint keeps polling for the Assistant overlay (0 = not polling)
+    private val logcatHintDeadlineUptimeMs = AtomicLong(0L)
+    private val logcatHintPoll = Runnable { pollForOverlayAfterLogcatHint() }
 
     @Volatile
     private var logcatThread: Thread? = null
@@ -36,11 +40,10 @@ class ChotAccessibilityService : AccessibilityService() {
         override fun onRecordingConfigChanged(configs: List<AudioRecordingConfiguration>) {
             val wasActive = isMicRecordingActive.getAndSet(configs.isNotEmpty())
             if (!wasActive && configs.isNotEmpty()) {
-                lastMicStartEpochMs.set(System.currentTimeMillis())
-                // If a TYPE_VOICE_INTERACTION window is already open when mic recording starts, intercept immediately
+                // If the Assistant / Gemini overlay is already open when mic recording starts, intercept immediately
                 handler.post {
                     if (hasActiveVoiceInteractionWindow()) {
-                        triggerIntercept("VoiceInteractionWindow+Mic")
+                        triggerIntercept("AssistantOverlayWindow+Mic")
                     }
                 }
             }
@@ -83,60 +86,54 @@ class ChotAccessibilityService : AccessibilityService() {
             return
         }
 
+        // Cheap early-out while paused; triggerIntercept enforces the pause switch for every automatic path
         if (!ChotPrefs.isEnabled(this)) return
 
-        // 2. Check if Android's system-level TYPE_VOICE_INTERACTION overlay window just appeared
-        if (hasActiveVoiceInteractionWindow()) {
-            triggerIntercept("TYPE_VOICE_INTERACTION Overlay")
-            return
-        }
-
-        // 3. Inspect Google App / Assistant / Gemini packages
+        // 2. Inspect Google App / Assistant / Gemini packages
         if (pkg in GOOGLE_ASSISTANT_PACKAGES) {
             val className = event.className?.toString() ?: ""
 
-            // Never hijack normal Google Search or Launcher activities
+            // Never hijack normal Google Search or Launcher activities (including the search-bar mic's voice search).
+            // Only window-state events carry the activity class; content events and the mic path stay safe because
+            // hasActiveVoiceInteractionWindow() accepts nothing but the overlay itself (no text or generic view-id
+            // heuristics, which is what used to match voice search).
             if (NORMAL_SEARCH_CLASSES.any { className.contains(it, ignoreCase = true) }) {
                 return
             }
 
-            // Immediate match on known Assistant / Gemini ("Robin") / VoicePlate activity classes
+            // Immediate match on the Assistant / Gemini overlay activity classes
             if (ASSISTANT_OVERLAY_CLASSES.any { className.contains(it, ignoreCase = true) }) {
                 triggerIntercept("AssistantActivity (${className.substringAfterLast('.')})")
                 return
             }
+        }
 
-            // Inspect the node hierarchy for Assistant / Gemini overlay resource IDs or voice prompts
-            val root = try {
-                rootInActiveWindow ?: event.source
-            } catch (_: Exception) {
-                null
-            }
-
-            if (root != null && isAssistantVoiceOverlayNode(root)) {
-                triggerIntercept("AssistantOverlayView ($pkg)")
-            }
+        // 3. Check if the Assistant / Gemini voice overlay window is on screen (also catches window-state events
+        //    the framework coalesced away)
+        if (hasActiveVoiceInteractionWindow()) {
+            triggerIntercept("AssistantOverlayWindow")
         }
     }
 
     /**
-     * Checks if any interactive window on screen is Google's VoiceInteractionSession / Assistant overlay.
-     * On Pixel 8, "Hey Google" opens a system/assistant overlay window whose title or root hierarchy
-     * belongs to Google Assistant / Gemini ("Robin"), whereas normal Google Search opens SearchActivity.
+     * Checks if Google's "Hey Google" voice overlay is on screen. Only the overlay itself counts: the full Gemini app
+     * and Google voice search are ordinary activity windows of the same packages and must never match.
+     * - Classic Google Assistant draws into the VoiceInteractionSession window (TYPE_VOICE_INTERACTION), which
+     *   AccessibilityWindowInfo has no constant for and reports as type -1 (not TYPE_SYSTEM).
+     * - Gemini draws into FloatyActivity, a transparent activity window, identified by its overlay root view.
      */
     private fun hasActiveVoiceInteractionWindow(): Boolean {
         return try {
             windows?.any { win ->
-                val title = win.title?.toString() ?: ""
-                if (title.equals("Google Assistant", ignoreCase = true) ||
-                    title.equals("Gemini", ignoreCase = true)
-                ) {
-                    return@any true
+                // Only these two window types can be the overlay; skip the root IPC for status bar, IME etc.
+                if (win.type != VOICE_INTERACTION_WINDOW_TYPE && win.type != AccessibilityWindowInfo.TYPE_APPLICATION) {
+                    return@any false
                 }
                 val root = win.root ?: return@any false
                 val pkg = root.packageName?.toString() ?: ""
                 if (pkg in GOOGLE_ASSISTANT_PACKAGES) {
-                    win.type == AccessibilityWindowInfo.TYPE_SYSTEM || isAssistantVoiceOverlayNode(root)
+                    win.type == VOICE_INTERACTION_WINDOW_TYPE ||
+                        root.findAccessibilityNodeInfosByViewId(GEMINI_OVERLAY_ROOT_VIEW_ID).isNotEmpty()
                 } else {
                     false
                 }
@@ -146,78 +143,47 @@ class ChotAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun isAssistantVoiceOverlayNode(node: AccessibilityNodeInfo, depth: Int = 0): Boolean {
-        if (depth > 8) return false
-
-        val viewId = node.viewIdResourceName ?: ""
-        if (viewId.isNotEmpty()) {
-            // Normal Google search bar / browser views should be ignored
-            if (viewId.contains("search_box") || viewId.contains("url_bar") || viewId.contains("doodle")) {
-                return false
-            }
-            if (ASSISTANT_VIEW_ID_TOKENS.any { viewId.contains(it, ignoreCase = true) }) {
-                return true
-            }
-        }
-
-        val text = node.text?.toString() ?: ""
-        val desc = node.contentDescription?.toString() ?: ""
-        val recentMic = (System.currentTimeMillis() - lastMicStartEpochMs.get()) < 3000L || isMicRecordingActive.get()
-
-        if (recentMic) {
-            if (ASSISTANT_PROMPT_STRINGS.any {
-                    text.equals(it, ignoreCase = true) || desc.equals(it, ignoreCase = true)
-                }
-            ) {
-                return true
-            }
-        }
-
-        val childCount = node.childCount
-        for (i in 0 until childCount) {
-            val child = try {
-                node.getChild(i)
-            } catch (_: Exception) {
-                null
-            } ?: continue
-            if (isAssistantVoiceOverlayNode(child, depth + 1)) {
-                return true
-            }
-        }
-        return false
-    }
-
     /**
      * Fires the intercept pipeline:
-     * 1. Enforces cooldown to prevent duplicate triggers.
-     * 2. Immediately dismisses Google's VoiceInteractionSession via GLOBAL_ACTION_BACK.
+     * 1. Honors the pause switch and enforces cooldown to prevent duplicate triggers.
+     * 2. Immediately dismisses Google's Assistant / Gemini overlay via GLOBAL_ACTION_BACK. Automatic callers
+     *    must only get here once the overlay is confirmed on screen, otherwise BACK lands in the user's app.
      * 3. Starts ChotTrampolineActivity to steal exclusive transient audio focus, verify mic release,
      *    wake the lock screen if needed, and launch Claude into Voice Mode.
+     *
+     * [manual] is set by MainActivity's Test button: it runs even while paused, skips the cooldown, and sends
+     * no BACK because there is no overlay to dismiss.
      */
-    fun triggerIntercept(source: String, bypassCooldown: Boolean = false) {
+    fun triggerIntercept(source: String, manual: Boolean = false) {
+        // Every automatic path (window events, mic callback, logcat) ends up here, so the pause switch is checked here
+        if (!manual && !ChotPrefs.isEnabled(this)) return
+
         val now = System.currentTimeMillis()
         val cooldown = ChotPrefs.getCooldownMs(this)
         val prev = lastInterceptEpochMs.get()
-        if (!bypassCooldown && (now - prev) < cooldown) {
+        if (!manual && (now - prev) < cooldown) {
             return
         }
         lastInterceptEpochMs.set(now)
+        logcatHintDeadlineUptimeMs.set(0L)
 
-        // Step 1: Dismiss Google Assistant / Gemini overlay immediately
-        try {
-            performGlobalAction(GLOBAL_ACTION_BACK)
-        } catch (_: Exception) {
-        }
-
-        // Follow-up check at 85ms: if TYPE_VOICE_INTERACTION overlay is still lingering, dismiss again
-        handler.postDelayed({
-            if (hasActiveVoiceInteractionWindow()) {
-                try {
-                    performGlobalAction(GLOBAL_ACTION_BACK)
-                } catch (_: Exception) {
-                }
+        if (!manual) {
+            // Step 1: Dismiss Google Assistant / Gemini overlay immediately
+            try {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            } catch (_: Exception) {
             }
-        }, 85L)
+
+            // Follow-up check at 85ms: if the overlay is still lingering, dismiss again
+            handler.postDelayed({
+                if (hasActiveVoiceInteractionWindow()) {
+                    try {
+                        performGlobalAction(GLOBAL_ACTION_BACK)
+                    } catch (_: Exception) {
+                    }
+                }
+            }, 85L)
+        }
 
         // Step 2: Launch transparent trampoline to force audio focus handover and launch Claude
         try {
@@ -240,9 +206,8 @@ class ChotAccessibilityService : AccessibilityService() {
     /**
      * Optional Hardware DSP Fast-Path:
      * If `adb shell pm grant dev.chot.pixel8 android.permission.READ_LOGS` has been granted,
-     * tails filtered logcat tags (`VoiceInteractionManagerService`, `SoundTriggerMiddlewareLogging`,
-     * `HotwordDetectionService`, `ActivityTaskManager`) so we intercept "Hey Google" at the hardware
-     * SoundTrigger boundary (<15ms latency, before the Google UI even finishes inflating).
+     * tails filtered logcat tags (`AlwaysOnHotwordDetector`, `ActivityTaskManager`) so we know "Hey Google"
+     * fired before the Google UI even finishes inflating. A hit is only a hint: see [onLogcatHotwordHint].
      */
     fun startLogcatDspWatcherIfPermitted() {
         if (checkSelfPermission(android.Manifest.permission.READ_LOGS) != PackageManager.PERMISSION_GRANTED) {
@@ -257,9 +222,7 @@ class ChotAccessibilityService : AccessibilityService() {
                     "logcat",
                     "-v", "brief",
                     "-T", "1",
-                    "VoiceInteractionManagerService:I",
-                    "SoundTriggerMiddlewareLogging:I",
-                    "HotwordDetectionService:I",
+                    "AlwaysOnHotwordDetector:I",
                     "ActivityTaskManager:I",
                     "*:S"
                 )
@@ -268,21 +231,22 @@ class ChotAccessibilityService : AccessibilityService() {
                 val reader = BufferedReader(InputStreamReader(proc.inputStream))
                 var line: String? = null
                 while (!Thread.currentThread().isInterrupted && reader.readLine().also { line = it } != null) {
-                    val l = line ?: continue
+                    val l = line?.trimEnd() ?: continue
                     if (!ChotPrefs.isEnabled(this@ChotAccessibilityService)) continue
 
+                    // - "onDetected" is logged by the default assistant's own hotword detector, so generic sound
+                    //   models (Now Playing etc.) can't produce it; Quick Phrases might, hence the overlay check.
+                    //   SoundTriggerMiddlewareLogging can't tell models apart, and VoiceInteractionManagerService
+                    //   logs nothing at INFO for a session.
+                    // - The START line is Gemini's overlay activity being launched (not the full Gemini app).
                     val isDspHotword =
-                        (l.contains("VoiceInteractionManagerService") &&
-                            (l.contains("showSession") || l.contains("startVoiceActivity") || l.contains("Hotword"))) ||
-                            (l.contains("SoundTriggerMiddlewareLogging") && l.contains("onRecognition")) ||
-                            (l.contains("ActivityTaskManager") && l.contains("START u0") &&
-                                (l.contains("VoicePlateActivity") ||
-                                    l.contains("RobinVoicePlateActivity") ||
-                                    l.contains("com.google.android.apps.search.assistant")))
+                        (l.startsWith("I/AlwaysOnHotwordDetector(") && l.endsWith("): onDetected")) ||
+                            (l.startsWith("I/ActivityTaskManager(") && l.contains("START u0") &&
+                                l.contains("cmp=$GEMINI_OVERLAY_COMPONENT"))
 
                     if (isDspHotword) {
                         handler.post {
-                            triggerIntercept("DSP-Logcat")
+                            onLogcatHotwordHint()
                         }
                     }
                 }
@@ -294,7 +258,37 @@ class ChotAccessibilityService : AccessibilityService() {
         logcatThread = thread
     }
 
+    /**
+     * Logcat lines arrive before the Assistant overlay exists, so BACK right away would land in the user's app.
+     * Poll for the overlay instead and intercept once it is confirmed; hints that never produce one (a rejected
+     * hotword, or an intercept that already happened) expire on their own.
+     */
+    private fun onLogcatHotwordHint() {
+        logcatHintDeadlineUptimeMs.set(SystemClock.uptimeMillis() + LOGCAT_HINT_CONFIRM_WINDOW_MS)
+        // Restart rather than stack polls when hints arrive back to back (onDetected, then the START line)
+        handler.removeCallbacks(logcatHintPoll)
+        handler.post(logcatHintPoll)
+    }
+
+    private fun pollForOverlayAfterLogcatHint() {
+        val deadline = logcatHintDeadlineUptimeMs.get()
+        if (deadline == 0L) return
+        if (SystemClock.uptimeMillis() >= deadline) {
+            logcatHintDeadlineUptimeMs.set(0L)
+            // Logged so the overlay matchers can be checked on the device
+            ChotPrefs.appendLog(this, "DSP-Logcat hint expired: no Assistant overlay appeared")
+            return
+        }
+        if (hasActiveVoiceInteractionWindow()) {
+            logcatHintDeadlineUptimeMs.set(0L)
+            triggerIntercept("DSP-Logcat")
+            return
+        }
+        handler.postDelayed(logcatHintPoll, LOGCAT_HINT_POLL_MS)
+    }
+
     private fun stopLogcatDspWatcher() {
+        handler.removeCallbacks(logcatHintPoll)
         try {
             logcatProcess?.destroy()
             logcatThread?.interrupt()
@@ -569,16 +563,29 @@ class ChotAccessibilityService : AccessibilityService() {
             "com.google.android.apps.bard"
         )
 
+        // Gemini's "Hey Google" overlay. The full Gemini app is a different activity in the same package
+        // (…voice.robin.main.MainActivity), and the com.google.android.apps.bard app is only a launcher shell for it.
+        private const val GEMINI_OVERLAY_ACTIVITY =
+            "com.google.android.apps.search.assistant.surfaces.voice.robin.ui.floaty.activity.FloatyActivity"
+        private const val GEMINI_OVERLAY_COMPONENT = "com.google.android.googlequicksearchbox/$GEMINI_OVERLAY_ACTIVITY"
+        private const val GEMINI_OVERLAY_ROOT_VIEW_ID =
+            "com.google.android.googlequicksearchbox:id/assistant_robin_floaty_root_container"
+
+        // AccessibilityWindowManager maps WindowManager's TYPE_VOICE_INTERACTION to no AccessibilityWindowInfo type
+        private const val VOICE_INTERACTION_WINDOW_TYPE = -1
+
+        private const val LOGCAT_HINT_CONFIRM_WINDOW_MS = 2000L
+        private const val LOGCAT_HINT_POLL_MS = 40L
+
         private val ASSISTANT_OVERLAY_CLASSES = listOf(
+            GEMINI_OVERLAY_ACTIVITY,
             "VoicePlate",
             "RobinVoicePlate",
             "RobinActivity",
             "AssistantActivity",
             "OpaActivity",
             "ZeroState",
-            "LockscreenEntry",
-            "com.google.android.apps.search.assistant",
-            "com.google.android.apps.bard"
+            "LockscreenEntry"
         )
 
         private val NORMAL_SEARCH_CLASSES = listOf(
@@ -586,26 +593,6 @@ class ChotAccessibilityService : AccessibilityService() {
             "GoogleAppActivity",
             "PixelSearch",
             "CustomTabs"
-        )
-
-        private val ASSISTANT_VIEW_ID_TOKENS = listOf(
-            ":id/assistant_",
-            ":id/robin_",
-            ":id/opa_",
-            ":id/voice_plate",
-            ":id/zero_state",
-            ":id/ lockscreen_",
-            ":id/glow_view",
-            ":id/transcription_"
-        )
-
-        private val ASSISTANT_PROMPT_STRINGS = listOf(
-            "Listening...",
-            "Listening…",
-            "Speak now",
-            "Ask Gemini",
-            "Talk to Gemini",
-            "Hi, how can I help?"
         )
 
         private val CLAUDE_VOICE_BUTTON_DESC_SUBSTRINGS = listOf(

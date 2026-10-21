@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Optional: Wakes screen when hotword triggers on AOD / lock screen -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <!-- Optional: Grants zero-latency (<15ms) hardware DSP hotword detection via ADB:
+    <!-- Optional: Enables the hardware DSP hotword logcat fast-path via ADB:
          adb shell pm grant dev.chot.pixel8 android.permission.READ_LOGS -->
     <uses-permission
         android:name="android.permission.READ_LOGS"
