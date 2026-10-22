@@ -7,6 +7,9 @@ All notable changes to chot are listed here. The format follows [Keep a Changelo
 ### Added
 - chot has an app icon: a lowercase c with a spark in its opening, on vermilion. On Android 13 and later it follows your themed-icon colors too.
 
+### Changed
+- The app is called just "chot" on the home screen and in the app list.
+
 ## [1.0.1] - 2026-10-22
 
 ### Fixed
