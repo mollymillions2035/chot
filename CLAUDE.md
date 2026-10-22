@@ -15,7 +15,7 @@ Issues 1–15 shipped fixed in 1.0.0 and are in `CHANGELOG.md`. Number new issue
 - Send the owner a push notification whenever they're needed, such as at the phone.
 
 ### Cloud or local session
-The owner mostly uses cloud sessions for now. What differs:
+The main work can happen in either kind of session. What differs:
 - **Cloud session:** works in a fresh clone in a container. It can build, but it can't reach the phone, and its APK is signed with the container's debug key, so it won't install over the phone's chot (uninstalling first would wipe chot's setup). It can't delete branches on GitHub (403), push tags or create releases. It tests through the local session, as below.
 - **Local session:** runs on the owner's computer, in the owner's own chot clone, with the Pixel 8 on USB. It runs adb itself (`.toolchain/android-sdk/platform-tools/adb`; adb isn't on PATH there), so it builds, installs and tests directly with the owner, with nothing relayed. Its builds have the key the phone's chot and the releases use. With the owner's OK it can delete merged branches on GitHub, push tags and create releases with `gh`.
   - The clone is the owner's: run `git status` before switching branches, and stop and ask if there are local changes.
@@ -36,7 +36,7 @@ Rules for every round, either way: the owner does the physical steps (saying "He
 3. Build on the owner's machine. Debug builds are signed with that machine's key, and the APK has to install over the chot on the phone. Check that the certificate digest matches the previous release's APK (`apksigner verify --print-certs`) and that `adb install -r` keeps chot's setup.
 4. Tag `vX.Y.Z` (annotated) on the release PR's merge commit and run `gh release create` with `chot-pixel8-X.Y.Z.apk` attached. The notes are that version's changelog section plus install and upgrade steps.
 
-Cloud sessions can't push tags or create releases in this repo, so the local session on the owner's machine does steps 3 and 4.
+Steps 3 and 4 need the owner's machine, so a local session does them. A cloud session can't push tags or create releases in this repo; it hands those steps to a local session.
 
 ## Owner's decisions
 - Long-pressing the power button should open a Claude voice chat, as it does through Gemini's overlay while Google is the default assistant (`power_button_long_press=5`). Don't "fix" that.
