@@ -5,7 +5,7 @@ Hardware DSP hotword bridge: intercepts "Hey Google" on a stock Pixel 8 and hand
 ## Known issues
 Issues 1–15 shipped fixed in 1.0.0 and are in `CHANGELOG.md`. Number new issues from 17 on, and list them here; once fixed, move them to a "Fixed (unreleased)" subsection until the next release takes them into the changelog.
 
-16. **Saying "Stop" to a ringing timer also opens Claude** (owner, 2026-10-22). While a timer rings, the Pixel listens for "Stop" without "Hey Google" (Quick Phrases). Saying it stops the timer, but a Claude voice chat opens too. The owner remembers it opening after the "Stop", and maybe also while the timer was still ringing. It should stop the timer and open nothing.
+16. **Saying "Stop" to a ringing timer also opens Claude** (owner, 2026-10-22). While a timer rings, the Pixel listens for "Stop" without "Hey Google" (Quick Phrases). Saying it stops the timer, but a Claude voice chat opens too. The most recent time, the owner clearly saw it open after the "Stop". Sometimes it may also open while the timer rings, before any "Stop"; the owner isn't sure. It should stop the timer and open nothing.
     - Not investigated yet. The likely cause is that Google handles the Quick Phrase with the same `FloatyActivity` or voice interaction window that chot intercepts for "Hey Google" (see "Hotword log lines" below).
     - First step, on the phone: set a short timer, say "Stop", and capture `adb logcat -v time ActivityTaskManager:I AlwaysOnHotwordDetector:I SoundTriggerMiddlewareLogging:I VoiceInteractionManager:D *:S` together with chot's log, whose intercept line names the window it matched. Repeat with the timer left ringing and no "Stop", and once with chot paused.
 
