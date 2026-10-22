@@ -111,9 +111,17 @@ object ClaudeWidget {
         // The label sits on the button's icon; the click goes to the nearest parent that handles it
         val button = generateSequence(labeled) { it.parent as? View }.firstOrNull { it.hasOnClickListeners() }
         if (button == null) {
+            // A stale copy shows only "Claude" (issue 17). Nothing else asks Claude to redraw a never-shown widget,
+            // so chot does: the options change reaches Claude's provider, and the next press finds the button
+            val redraw = try {
+                AppWidgetManager.getInstance(activity).updateAppWidgetOptions(id, sizeOptions())
+                "asked Claude to redraw it"
+            } catch (e: Exception) {
+                "redraw failed: ${e.javaClass.simpleName}"
+            }
             ChotPrefs.appendLog(
                 activity,
-                "Claude's widget has no Voice chat button (labels: ${labels.joinToString().ifEmpty { "none" }})"
+                "Claude's widget has no Voice chat button (labels: ${labels.joinToString().ifEmpty { "none" }}); $redraw"
             )
         }
         return button
