@@ -27,6 +27,7 @@ class ChotAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private val lastInterceptEpochMs = AtomicLong(0L)
     private val isMicRecordingActive = AtomicBoolean(false)
+    private val quickPhrasesLogged = AtomicBoolean(false)
 
     private val audioRecordingCallback = object : AudioManager.AudioRecordingCallback() {
         override fun onRecordingConfigChanged(configs: List<AudioRecordingConfiguration>) {
@@ -131,8 +132,11 @@ class ChotAccessibilityService : AccessibilityService() {
      * - Classic Google Assistant draws into the VoiceInteractionSession window (TYPE_VOICE_INTERACTION), which
      *   AccessibilityWindowInfo has no constant for and reports as type -1 (not TYPE_SYSTEM).
      * - Gemini draws into FloatyActivity, a transparent activity window, identified by its overlay root view.
+     * - Quick Phrases (say "Stop" to a ringing timer or alarm, no "Hey Google") show their "Say “Stop”" pill in the
+     *   same VoiceInteractionSession window as soon as the timer rings. That window is skipped.
      */
     private fun hasActiveVoiceInteractionWindow(): Boolean {
+        var quickPhrasesShown = false
         return try {
             windows?.any { win ->
                 // Only these two window types can be the overlay; skip the root IPC for status bar, IME etc.
@@ -142,15 +146,31 @@ class ChotAccessibilityService : AccessibilityService() {
                 val root = win.root ?: return@any false
                 val pkg = root.packageName?.toString() ?: ""
                 if (pkg in GOOGLE_ASSISTANT_PACKAGES) {
-                    win.type == VOICE_INTERACTION_WINDOW_TYPE ||
+                    if (win.type == VOICE_INTERACTION_WINDOW_TYPE) {
+                        quickPhrasesShown = isQuickPhrasesWindow(root)
+                        !quickPhrasesShown
+                    } else {
                         root.findAccessibilityNodeInfosByViewId(GEMINI_OVERLAY_ROOT_VIEW_ID).isNotEmpty()
+                    }
                 } else {
                     false
                 }
             } == true
         } catch (_: Exception) {
             false
+        } finally {
+            if (!quickPhrasesShown) quickPhrasesLogged.set(false)
         }
+    }
+
+    private fun isQuickPhrasesWindow(root: AccessibilityNodeInfo): Boolean {
+        val pill = root.findAccessibilityNodeInfosByViewId(QUICK_PHRASES_ROOT_VIEW_ID).firstOrNull() ?: return false
+        // Logged once each time the pill shows, since every accessibility event while the timer rings asks again
+        if (!quickPhrasesLogged.getAndSet(true)) {
+            val phrase = root.findAccessibilityNodeInfosByViewId(QUICK_PHRASES_PHRASE_VIEW_ID).firstOrNull()?.text
+            ChotPrefs.appendLog(this, "Skipped Google's Quick Phrases window (\"${phrase ?: pill.contentDescription ?: "?"}\")")
+        }
+        return true
     }
 
     /**
@@ -705,6 +725,12 @@ class ChotAccessibilityService : AccessibilityService() {
             "com.google.android.apps.search.assistant.surfaces.voice.robin.ui.floaty.activity.FloatyActivity"
         private const val GEMINI_OVERLAY_ROOT_VIEW_ID =
             "com.google.android.googlequicksearchbox:id/assistant_robin_floaty_root_container"
+
+        // Quick Phrases' "Say “Stop”" pill, which shares the VoiceInteractionSession window with classic Assistant
+        private const val QUICK_PHRASES_ROOT_VIEW_ID =
+            "com.google.android.googlequicksearchbox:id/quick_phrases_base_container"
+        private const val QUICK_PHRASES_PHRASE_VIEW_ID =
+            "com.google.android.googlequicksearchbox:id/quick_phrases_pill_phrase"
 
         // AccessibilityWindowManager maps WindowManager's TYPE_VOICE_INTERACTION to no AccessibilityWindowInfo type
         private const val VOICE_INTERACTION_WINDOW_TYPE = -1
