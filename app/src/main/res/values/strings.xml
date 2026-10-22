@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">chot (Claude Hotword)</string>
+    <string name="app_name">chot</string>
     <string name="accessibility_service_description">Intercepts the Pixel 8 hardware "Hey Google" DSP trigger, immediately dismisses the Google Assistant / Gemini voice plate, waits for microphone release, and launches the official Claude app directly into Voice Mode / Assistant overlay.</string>
 </resources>
