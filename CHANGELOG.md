@@ -4,6 +4,12 @@ All notable changes to chot are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-22
+
+### Fixed
+- Saying "Stop" to a ringing timer no longer opens Claude. As soon as a timer rings, Google shows a "Say “Stop”" pill, and chot took it for "Hey Google": it asked you to unlock and then opened Claude. chot now ignores that pill (16).
+- After Claude was force-stopped, every "Hey Google" opened voice mode the slower way, because chot's hidden copy of Claude's widget had lost its Voice chat button. chot now asks Claude to redraw it, so only the first "Hey Google" after a force-stop takes the slower way (17).
+
 ## [1.0.0] - 2026-10-21
 
 ### Added
@@ -38,6 +44,7 @@ All notable changes to chot are listed here. The format follows [Keep a Changelo
 ### Added
 - First release: a hardware DSP hotword bridge that hands "Hey Google" off to Claude voice mode on a stock Pixel 8. The APK is debug-signed; set up the phone with `scripts/pixel8-adb-setup.sh`.
 
-[Unreleased]: https://github.com/mollymillions2035/chot/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/mollymillions2035/chot/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/mollymillions2035/chot/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/mollymillions2035/chot/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/mollymillions2035/chot/releases/tag/v0.1.0
