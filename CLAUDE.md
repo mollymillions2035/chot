@@ -8,14 +8,21 @@ None open. Issues 1–15 shipped fixed in 1.0.0 and are in `CHANGELOG.md`. Numbe
 ## Working on chot
 - Work on a branch, open a PR to `main`, and merge it yourself once it's ready: the owner asked sessions to merge their own PRs. Commit messages start with `fix:`, `feat:`, `docs:` or `chore:`.
 - There's no CI and no test suite. `./scripts/build-apk.sh` has to build cleanly (it downloads a JDK, the Android SDK and Gradle into `.toolchain/` on first run, in cloud sessions too), and the phone is the real test.
-- Cloud sessions can't delete branches on GitHub (403), push tags or create releases. The owner or the local session does those.
 - Send the owner a push notification whenever they're needed, such as at the phone.
 
+### Cloud or local session
+The owner mostly uses cloud sessions for now. What differs:
+- **Cloud session:** works in a fresh clone in a container. It can build, but it can't reach the phone, and its APK is signed with the container's debug key, so it won't install over the phone's chot (uninstalling first would wipe chot's setup). It can't delete branches on GitHub (403), push tags or create releases. It tests through the local session, as below.
+- **Local session:** runs on the owner's computer, in the owner's own chot clone, with the Pixel 8 on USB. It runs adb itself (`.toolchain/android-sdk/platform-tools/adb`; adb isn't on PATH there), so it builds, installs and tests directly with the owner, with nothing relayed. Its builds have the key the phone's chot and the releases use. With the owner's OK it can delete merged branches on GitHub, push tags and create releases with `gh`.
+  - The clone is the owner's: run `git status` before switching branches, and stop and ask if there are local changes.
+  - Keep raw test captures (`uiautomator` dumps, screenshots, logcat) in the scratchpad, never in the repo: they hold whatever was on screen.
+
 ### Testing on the phone
-The Pixel 8 is plugged into the owner's computer, which runs a local Claude Code session in the owner's chot clone. A cloud session can't reach the phone, so it tests through that session:
-- Find it with `list_sessions` (`mine: true`) and brief it with `send_message`: the commit to pull, what changed, the steps, and what to report. The owner does the physical steps (saying "Hey Google", unlocking, tapping); the local session builds, installs with `adb install -r` (which keeps chot's setup), watches logcat and reads chot's log (see Testing tips below).
+A local session tests directly, with the owner at the phone. A cloud session tests through the local session:
+- Find it with `list_sessions` (`mine: true`) and brief it with `send_message`: the commit to pull, what changed, the steps, and what to report. The local session builds, installs with `adb install -r` (which keeps chot's setup), watches logcat and reads chot's log (see Testing tips below). While testing for a cloud session, it doesn't edit repo files.
 - The local session's `send_message` back to the cloud fails, so it puts its report in its final reply, and the cloud reads that with `list_events` (kinds `result`). Reading another session's transcript takes the owner's one-time approval on a trusted device.
-- Rules for every round: don't edit repo files; never tap Send or send anything in Claude; never speak into voice mode, and stop any voice session within a couple of seconds; don't change phone or assistant settings without asking the owner; write chot in lowercase.
+
+Rules for every round, either way: the owner does the physical steps (saying "Hey Google", unlocking, tapping); never tap Send or send anything in Claude; never speak into voice mode, and stop any voice session within a couple of seconds; don't change phone or assistant settings without asking the owner.
 
 ## Releases
 `CHANGELOG.md` at the repo root follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): newest version first, an `[Unreleased]` section on top, and Added / Changed / Removed / Fixed groups. It's written for users, with issue numbers in parentheses. The owner's rule (2026-10-21): every release takes the fixed issues and the `[Unreleased]` entries into the changelog, and the changelog goes out with the release.
