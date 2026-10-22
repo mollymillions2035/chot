@@ -3,7 +3,11 @@
 Hardware DSP hotword bridge: intercepts "Hey Google" on a stock Pixel 8 and hands off to Claude Voice Mode. Pronounced "c-hot", and always written with a lowercase c, even at the start of a sentence: "chot". Class names such as `ChotAccessibilityService` follow Kotlin naming instead.
 
 ## Known issues
-None open. Issues 1–15 shipped fixed in 1.0.0 and are in `CHANGELOG.md`. Number new issues from 16 on, and list them here; once fixed, move them to a "Fixed (unreleased)" subsection until the next release takes them into the changelog.
+Issues 1–15 shipped fixed in 1.0.0 and are in `CHANGELOG.md`. Number new issues from 17 on, and list them here; once fixed, move them to a "Fixed (unreleased)" subsection until the next release takes them into the changelog.
+
+16. **Saying "Stop" to a ringing timer also opens Claude** (owner, 2026-10-22). While a timer rings, the Pixel listens for "Stop" without "Hey Google" (Quick Phrases). Saying it stops the timer, but a Claude voice chat opens too. The owner remembers it opening after the "Stop", and maybe also while the timer was still ringing. It should stop the timer and open nothing.
+    - Not investigated yet. The likely cause is that Google handles the Quick Phrase with the same `FloatyActivity` or voice interaction window that chot intercepts for "Hey Google" (see "Hotword log lines" below).
+    - First step, on the phone: set a short timer, say "Stop", and capture `adb logcat -v time ActivityTaskManager:I AlwaysOnHotwordDetector:I SoundTriggerMiddlewareLogging:I VoiceInteractionManager:D *:S` together with chot's log, whose intercept line names the window it matched. Repeat with the timer left ringing and no "Stop", and once with chot paused.
 
 ## Working on chot
 - Work on a branch, open a PR to `main`, and merge it yourself once it's ready: the owner asked sessions to merge their own PRs. Commit messages start with `fix:`, `feat:`, `docs:` or `chore:`.
