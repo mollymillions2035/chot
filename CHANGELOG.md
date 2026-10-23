@@ -8,7 +8,7 @@ All notable changes to chot are listed here. The format follows [Keep a Changelo
 - chot no longer turns its accessibility service back on by itself after a force-stop. Instead, when you open chot and the service was on but is now off, it shows a notification and an ACTION NEEDED row; tapping either opens Accessibility settings, where you turn chot back on. chot asks for the notification permission on its screen, and the status list has a "5. Notifications" button for it (#64).
 
 ### Removed
-- The `WRITE_SECURE_SETTINGS` permission, which let chot edit the system's list of enabled accessibility services. "1. Enable Accessibility" now always opens Accessibility settings, and `scripts/pixel8-adb-setup.sh` no longer grants the permission (#64).
+- The `WRITE_SECURE_SETTINGS` permission, which let chot edit the system's list of enabled accessibility services. "1. Enable Accessibility" now always opens Accessibility settings, and `scripts/pixel8-adb-setup.sh` no longer grants the permission. Installing this version makes Android drop the grant for good: if you go back to 1.1.1 or earlier, run the setup script again or `adb shell pm grant dev.chot.pixel8 android.permission.WRITE_SECURE_SETTINGS` (#64).
 
 ## [1.1.1] - 2026-10-23
 
