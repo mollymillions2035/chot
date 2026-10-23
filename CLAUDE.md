@@ -5,6 +5,9 @@ Hardware DSP hotword bridge: intercepts "Hey Google" on a stock Pixel 8 and hand
 ## Known issues
 Issues 1–15 shipped fixed in 1.0.0, 16–17 in 1.0.1 and 18–24 in 1.1.0; they're in `CHANGELOG.md`. Number new issues from 25 on, and list them here; once fixed, move them to a "Fixed (unreleased)" subsection until the next release takes them into the changelog.
 
+### Fixed (unreleased)
+- 25: after a force-stop, chot's accessibility check said ACTION NEEDED until "1. Enable Accessibility" was tapped, and chot caught no "Hey Google" until then. Android had really turned the service off (see Force-stop below); the button wrote it back with `WRITE_SECURE_SETTINGS`. chot now keeps `accessibility_service_wanted` in its prefs, set in `onServiceConnected` and cleared in `onUnbind` (turned off in Settings, which a force-stop never calls), and on opening chot, if the service is wanted but off, it writes it back and logs "Accessibility service was turned off by a force-stop: turned it back on". Checked on the phone (2026-10-23): after `am force-stop` the setting was `null` with the flag still set; opening chot restored it, the service connected 175ms later and the check said READY. Nothing can restore it before chot is opened, since a force-stopped app gets no broadcasts until it's launched.
+
 ## Working on chot
 - Work on a branch, open a PR to `main`, and merge it yourself once it's ready: the owner asked sessions to merge their own PRs. Commit messages start with `fix:`, `feat:`, `docs:` or `chore:`.
 - There's no CI and no test suite. `./scripts/build-apk.sh` has to build cleanly (it downloads a JDK, the Android SDK and Gradle into `.toolchain/` on first run, in cloud sessions too), and the phone is the real test.
@@ -101,6 +104,7 @@ For future matching work:
 - **Hotword log lines:** only the default assistant's detector logs `onDetected`, so generic sound models such as Now Playing can't produce it; Quick Phrases don't (see above). VIMS logs under `VoiceInteractionManager`, nothing at INFO, and SoundTrigger prints `RECOGNITION (`, not `onRecognition`.
 - **Assistant settings:** with Google as the default assistant, `voice_interaction_service` and `assistant` are both `…/com.google.android.voiceinteraction.GsaVoiceInteractionService`, and the ASSISTANT role holder is `com.google.android.googlequicksearchbox`. Changing the assistant in Settings updates all three together; writing them over adb doesn't touch the role.
 - **BACK:** `performGlobalAction(BACK)` goes through SystemUI and reaches whichever window has input focus when it arrives. If no window has focus yet (an activity is still starting), it waits for the next one, which can be Claude.
+- **Force-stop:** force-stopping chot (`am force-stop` or Settings' Force stop) removes it from `enabled_accessibility_services` (the setting goes to `null` if it was the only one) and unbinds it, without calling `onUnbind`. The Accessibility settings screen then shows chot off.
 - **Unlock prompt:** asked for with `requestDismissKeyguard` while the phone is still waking from screen-off, it offers only the PIN pad; once the screen has been on for about 0.8s, it offers the fingerprint. A finger on the under-display sensor before the prompt's fingerprint icon appears doesn't register.
 - **Testing tips:**
   - `adb shell uiautomator dump` rebinds accessibility services, so chot logs "connected & armed" after each dump.

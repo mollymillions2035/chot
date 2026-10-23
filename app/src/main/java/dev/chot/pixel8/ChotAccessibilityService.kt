@@ -54,6 +54,7 @@ class ChotAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        ChotPrefs.setServiceWanted(this, true)
         ChotPrefs.appendLog(this, "ChotAccessibilityService connected & armed")
 
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -82,6 +83,13 @@ class ChotAccessibilityService : AccessibilityService() {
         } catch (_: Exception) {
         }
         super.onDestroy()
+    }
+
+    // Android unbinds the service when it's turned off in Settings, so chot won't turn it back on (25).
+    // A uiautomator dump unbinds and rebinds, and onServiceConnected sets it again.
+    override fun onUnbind(intent: Intent?): Boolean {
+        ChotPrefs.setServiceWanted(this, false)
+        return super.onUnbind(intent)
     }
 
     override fun onInterrupt() {
