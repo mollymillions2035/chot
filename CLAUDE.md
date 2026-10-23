@@ -8,7 +8,7 @@ Issues live on GitHub, not in this file: check `gh issue list` before starting w
 ## Working on chot
 - Work on a branch, open a PR to `main`, and merge it yourself once it's ready: the owner asked sessions to merge their own PRs. GitHub deletes a PR's branch when it merges (the repo's auto-delete setting), so only the local branch is left to remove. Commit messages start with `fix:`, `feat:`, `docs:` or `chore:`.
 - There's no CI and no test suite. `./scripts/build-apk.sh` has to build cleanly (it downloads a JDK, the Android SDK and Gradle into `.toolchain/` on first run, in cloud sessions too), and the phone is the real test.
-- Send the owner a push notification whenever they're needed, such as at the phone.
+- Send the owner a push notification only when they're needed and may have stepped away, such as for a step at the phone after a long build. When they're actively in the desktop app, replying in the session is enough; don't push to their phone as well (owner, 2026-10-23).
 
 ### Cloud or local session
 The main work can happen in either kind of session. What differs:
