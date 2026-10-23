@@ -63,3 +63,7 @@ On stock Android (Pixel 8 `user` builds):
    ```
 4. Open chot on the phone, tap **4. Claude Widget (Voice chat button)** and allow chot to create widgets. This one-time step lets chot start voice mode through Claude's own widget. Your home screen doesn't change.
 5. Say **"Hey Google"** to your Pixel 8 — Google Assistant is instantly dismissed, the mic is handed over, and Claude opens directly into Voice Mode!
+
+## License
+
+chot is dedicated to the public domain under [CC0 1.0](LICENSE): you can copy, change and share it without asking. It comes with no warranty.
