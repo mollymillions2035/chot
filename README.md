@@ -49,20 +49,36 @@ On stock Android (Pixel 8 `user` builds):
 
 ---
 
-## Quick Start (One-Command Build + Auto-Setup over ADB)
+## Quick Start
 
-1. Make sure the official **Claude** app (`com.anthropic.claude`) is installed on your Pixel 8 and **USB Debugging** (or Wireless Debugging) is enabled.
-   Google (Gemini) must be your **default digital assistant** (Settings → Apps → Default apps → Digital assistant app). chot needs Google's hotword detection running, and it doesn't change this setting for you.
-2. Build the signed APK (automatically downloads portable JDK 17, Android SDK 34, and Gradle 8.7 into `.toolchain/` if not installed on your machine):
+You need a Pixel 8 with the official **Claude** app (`com.anthropic.claude`) installed. Google (Gemini) must be your **default digital assistant** (Settings → Apps → Default apps → Digital assistant app): chot needs Google's hotword detection running, and it doesn't change this setting for you.
+
+1. Download `chot-pixel8-X.Y.Z.apk` from the [latest release](https://github.com/mollymillions2035/chot/releases/latest) and install it, either by opening it on the phone (allow installs from that app when asked) or with `adb install -r chot-pixel8-X.Y.Z.apk`.
+2. Open chot and tap, in order:
+   - **1. Enable Accessibility**, and turn chot on.
+   - **2. Overlay Permission**, and allow it.
+   - **5. Notifications**, and allow them, so chot can tell you if a force-stop turns its service off.
+   - **4. Claude Widget (Voice chat button)**, and allow chot to create widgets. This one-time step lets chot start voice mode through Claude's own widget. Your home screen doesn't change.
+3. Say **"Hey Google"**. Google's overlay closes, the mic is handed over, and Claude opens in voice mode.
+
+To update, install the newer release APK over the old one. Your setup is kept.
+
+## Build from Source
+
+If you'd rather not run an APK someone else built, build your own:
+
+1. Build the debug APK. The script downloads a portable JDK 17, Android SDK 34 and Gradle 8.7 into `.toolchain/` on first run, so nothing needs to be installed on your machine:
    ```bash
    ./scripts/build-apk.sh
    ```
-3. Plug in your Pixel 8 and run the automated setup script (installs `chot-pixel8.apk`, grants `SYSTEM_ALERT_WINDOW` and chot's notification permission, checks that Google is still the default assistant, and enables `ChotAccessibilityService` over adb). Without the script, install the APK with `adb install -r` and tap **1. Enable Accessibility** and **5. Notifications** in chot:
+2. Enable **USB Debugging** (or Wireless Debugging) on the phone, plug it in and run the setup script. It installs `chot-pixel8.apk`, grants the overlay and notification permissions, checks that Google is still the default assistant and enables chot's accessibility service over adb:
    ```bash
    ./scripts/pixel8-adb-setup.sh
    ```
-4. Open chot on the phone, tap **4. Claude Widget (Voice chat button)** and allow chot to create widgets. This one-time step lets chot start voice mode through Claude's own widget. Your home screen doesn't change.
-5. Say **"Hey Google"** to your Pixel 8 — Google Assistant is instantly dismissed, the mic is handed over, and Claude opens directly into Voice Mode!
+   The script also takes an APK path, such as a downloaded release: `./scripts/pixel8-adb-setup.sh chot-pixel8-X.Y.Z.apk`. Without the script, install with `adb install -r` and tap the buttons in step 2 of Quick Start.
+3. In chot, tap **4. Claude Widget (Voice chat button)** and allow chot to create widgets, then say **"Hey Google"**.
+
+Your build is signed with your own debug key (`~/.android/debug.keystore`), not the key the releases use, so Android won't install one over the other. To switch between a release and your own build, uninstall chot first, which clears its setup, and set it up again.
 
 ## License
 
