@@ -4,6 +4,9 @@ All notable changes to chot are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Added
+- A license: chot is dedicated to the public domain under CC0 1.0, so you can copy, change and share it without asking.
+
 ## [1.2.0] - 2026-10-23
 
 ### Changed
