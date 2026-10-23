@@ -20,7 +20,7 @@ The main work can happen in either kind of session. What differs:
 
 ### Testing on the phone
 A local session tests directly, with the owner at the phone. A cloud session tests through the local session:
-- Find it with `list_sessions` (`mine: true`) and brief it with `send_message`: the commit to pull, what changed, the steps, and what to report. The local session builds, installs with `adb install -r` (which keeps chot's setup), watches logcat and reads chot's log (see Testing tips below). While testing for a cloud session, it doesn't edit repo files.
+- Don't pick an existing local session on your own (owner, 2026-10-23). Ask the owner to start a new local session in their clone, or, if one already holds a lot of their work, whether it's OK to use it; then brief the one they name with `send_message`: the commit to pull, what changed, the steps, and what to report. `list_sessions` (`mine: true`) only tells you which sessions exist. The local session builds, installs with `adb install -r` (which keeps chot's setup), watches logcat and reads chot's log (see Testing tips below). While testing for a cloud session, it doesn't edit repo files.
 - The local session's `send_message` back to the cloud fails, so it puts its report in its final reply, and the cloud reads that with `list_events` (kinds `result`). Reading another session's transcript takes the owner's one-time approval on a trusted device.
 
 Rules for every round, either way: the owner does the physical steps (saying "Hey Google", unlocking, tapping); never tap Send or send anything in Claude; never speak into voice mode, and stop any voice session within a couple of seconds; don't change phone or assistant settings without asking the owner.
