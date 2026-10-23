@@ -37,6 +37,7 @@ object ChotPrefs {
     private const val KEY_TAP_Y_PCT = "tap_y_pct"
     private const val KEY_LOGS = "event_logs"
     private const val KEY_CLAUDE_WIDGET_ID = "claude_widget_id"
+    private const val KEY_SERVICE_WANTED = "accessibility_service_wanted"
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -91,6 +92,17 @@ object ChotPrefs {
 
     fun setClaudeWidgetId(context: Context, id: Int) {
         prefs(context).edit().putInt(KEY_CLAUDE_WIDGET_ID, id).apply()
+    }
+
+    /**
+     * Whether chot's accessibility service should be on: set when it connects, cleared when Android unbinds it
+     * (turned off in Settings). A force-stop kills chot without either, so it stays set (25).
+     */
+    fun isServiceWanted(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_SERVICE_WANTED, false)
+
+    fun setServiceWanted(context: Context, wanted: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SERVICE_WANTED, wanted).apply()
     }
 
     @Synchronized
