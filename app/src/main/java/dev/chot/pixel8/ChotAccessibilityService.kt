@@ -55,6 +55,7 @@ class ChotAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         ChotPrefs.setServiceWanted(this, true)
+        ChotNotifications.cancelServiceOff(this)
         ChotPrefs.appendLog(this, "ChotAccessibilityService connected & armed")
 
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager

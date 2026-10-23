@@ -1,13 +1,13 @@
 package dev.chot.pixel8
 
+import android.Manifest
 import android.app.Activity
 import android.appwidget.AppWidgetManager
-import android.content.ComponentName
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
@@ -32,6 +32,7 @@ class MainActivity : Activity() {
     private lateinit var statusContainer: LinearLayout
     private lateinit var logTextView: TextView
     private var pendingWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
+    private var notificationPermissionAsked = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,11 +43,53 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        // A force-stop makes Android drop chot from the enabled accessibility services, with no callback to chot.
-        // If the service was on before, opening chot turns it back on (#61).
-        if (ChotPrefs.isServiceWanted(this) && !isAccessibilityServiceEnabled() && tryAutoEnableAccessibilityService()) {
-            ChotPrefs.appendLog(this, "Accessibility service was turned off by a force-stop: turned it back on")
+        // A force-stop makes Android drop chot from the enabled accessibility services, with no callback to chot,
+        // and chot can't turn it back on itself (#64). Opening chot is the first chance to say so: nothing runs in
+        // a force-stopped app until it's launched (#61).
+        if (!notificationPermissionAsked && !ChotNotifications.canNotify(this)) {
+            requestNotificationPermission(fromButton = false)
         }
+        syncServiceOffNotification()
+        refreshStatusAndLogs()
+    }
+
+    private fun syncServiceOffNotification() {
+        if (ChotNotifications.syncServiceOff(this)) {
+            ChotPrefs.appendLog(this, "Accessibility service was turned off by a force-stop: posted the notification")
+        }
+    }
+
+    /**
+     * Asks for the Android 13+ notification permission. Once it has been asked this time and Android won't show the
+     * dialog again (refused for good), the button opens chot's notification settings instead; the automatic ask on
+     * opening chot never does, so a refusal doesn't send every open to Settings.
+     */
+    private fun requestNotificationPermission(fromButton: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || ChotNotifications.canNotify(this)) return
+        if (fromButton && notificationPermissionAsked &&
+            !shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+        ) {
+            openNotificationSettings()
+            return
+        }
+        notificationPermissionAsked = true
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_POST_NOTIFICATIONS)
+    }
+
+    private fun openNotificationSettings() {
+        try {
+            startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_POST_NOTIFICATIONS) return
+        syncServiceOffNotification()
         refreshStatusAndLogs()
     }
 
@@ -120,16 +163,7 @@ class MainActivity : Activity() {
 
         buttonRow.addView(
             styledButton("1. Enable Accessibility", "#D97757") {
-                if (tryAutoEnableAccessibilityService()) {
-                    Toast.makeText(
-                        this,
-                        "Auto-enabled chot Accessibility Service via WRITE_SECURE_SETTINGS!",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    refreshStatusAndLogs()
-                } else {
-                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                }
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 rightMargin = dp(6)
@@ -169,6 +203,19 @@ class MainActivity : Activity() {
         readinessCard.addView(buttonRow)
         readinessCard.addView(
             styledButton("4. Claude Widget (Voice chat button)", "#252A38") { setUpClaudeWidget() },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(8) }
+        )
+        readinessCard.addView(
+            styledButton("5. Notifications (service turned off alert)", "#252A38") {
+                if (ChotNotifications.canNotify(this)) {
+                    Toast.makeText(this, "Notifications are already allowed.", Toast.LENGTH_SHORT).show()
+                } else {
+                    requestNotificationPermission(fromButton = true)
+                }
+            },
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -359,11 +406,14 @@ class MainActivity : Activity() {
         statusContainer.addView(statusRow("Pixel 8 Hardware DSP (\"Hey Google\")", isGoogleDefault, assistantMsg))
 
         // 3. Check chot Accessibility Service
-        val isAccessEnabled = isAccessibilityServiceEnabled()
-        val accessMsg = if (isAccessEnabled) {
-            "Active & watching for \"Hey Google\" overlay + Claude Voice handover"
-        } else {
-            "DISABLED — Tap '1. Enable Accessibility' below and turn on chot"
+        val isAccessEnabled = ChotNotifications.isAccessibilityServiceEnabled(this)
+        val accessMsg = when {
+            isAccessEnabled ->
+                "Active & watching for \"Hey Google\" overlay + Claude Voice handover"
+            ChotPrefs.isServiceWanted(this) ->
+                "TURNED OFF by a force-stop — Tap '1. Enable Accessibility' below and turn chot back on"
+            else ->
+                "DISABLED — Tap '1. Enable Accessibility' below and turn on chot"
         }
         statusContainer.addView(statusRow("chot Accessibility Interceptor", isAccessEnabled, accessMsg))
 
@@ -387,6 +437,15 @@ class MainActivity : Activity() {
                 "Not set up • Tap '4. Claude Widget' below. Without it chot opens Claude and taps its Voice button, which fails with a draft or a Claude Code session open."
         }
         statusContainer.addView(statusRow("Claude Widget (Voice chat button)", widgetId != null, widgetMsg))
+
+        // 6. Check the notification permission, for the alert when a force-stop turns the service off (#64)
+        val canNotify = ChotNotifications.canNotify(this)
+        val notifyMsg = if (canNotify) {
+            "ALLOWED • chot notifies you if a force-stop turns its accessibility service off"
+        } else {
+            "Tap '5. Notifications' below, else you only find out when \"Hey Google\" opens Gemini instead of Claude"
+        }
+        statusContainer.addView(statusRow("Notifications (service turned off alert)", canNotify, notifyMsg))
 
         logTextView.text = ChotPrefs.getLogs(this)
     }
@@ -433,47 +492,6 @@ class MainActivity : Activity() {
         ClaudeWidget.onBound(this, id)
         Toast.makeText(this, "Claude's widget is set up.", Toast.LENGTH_SHORT).show()
         refreshStatusAndLogs()
-    }
-
-    private fun isAccessibilityServiceEnabled(): Boolean {
-        if (ChotAccessibilityService.instance != null) return true
-        val expected = ComponentName(this, ChotAccessibilityService::class.java).flattenToString()
-        val enabledServices = Settings.Secure.getString(
-            contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: return false
-        return enabledServices.split(':').any { it.equals(expected, ignoreCase = true) }
-    }
-
-    private fun tryAutoEnableAccessibilityService(): Boolean {
-        if (checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            return false
-        }
-        return try {
-            val comp = ComponentName(this, ChotAccessibilityService::class.java).flattenToString()
-            val current = Settings.Secure.getString(
-                contentResolver,
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-            ) ?: ""
-            val updated = if (current.isBlank()) {
-                comp
-            } else if (!current.contains(comp)) {
-                "$current:$comp"
-            } else {
-                current
-            }
-            Settings.Secure.putString(
-                contentResolver,
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-                updated
-            )
-            Settings.Secure.putInt(contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
-            true
-        } catch (_: Exception) {
-            false
-        }
     }
 
     private fun statusRow(title: String, ok: Boolean, subtitle: String): View {
@@ -566,5 +584,6 @@ class MainActivity : Activity() {
 
     companion object {
         private const val REQUEST_BIND_CLAUDE_WIDGET = 1
+        private const val REQUEST_POST_NOTIFICATIONS = 2
     }
 }

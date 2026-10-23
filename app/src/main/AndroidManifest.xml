@@ -1,14 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Guarantees Background Activity Launch (BAL) exemption on Android 14/15/16 when launching Claude -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- Optional: Allows automatic self-healing of accessibility settings via ADB:
-         adb shell pm grant dev.chot.pixel8 android.permission.WRITE_SECURE_SETTINGS -->
-    <uses-permission
-        android:name="android.permission.WRITE_SECURE_SETTINGS"
-        tools:ignore="ProtectedPermissions" />
+    <!-- chot notifies when a force-stop has turned its accessibility service off (#64); asked for on chot's screen -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Package visibility for Claude and Google Assistant / Gemini on Android 11+ -->
     <queries>

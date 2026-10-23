@@ -57,7 +57,7 @@ On stock Android (Pixel 8 `user` builds):
    ```bash
    ./scripts/build-apk.sh
    ```
-3. Plug in your Pixel 8 and run the automated setup script (installs `chot-pixel8.apk`, grants `WRITE_SECURE_SETTINGS` and `SYSTEM_ALERT_WINDOW`, checks that Google is still the default assistant, and enables `ChotAccessibilityService` automatically):
+3. Plug in your Pixel 8 and run the automated setup script (installs `chot-pixel8.apk`, grants `SYSTEM_ALERT_WINDOW` and chot's notification permission, checks that Google is still the default assistant, and enables `ChotAccessibilityService` over adb). Without the script, install the APK with `adb install -r` and tap **1. Enable Accessibility** and **5. Notifications** in chot:
    ```bash
    ./scripts/pixel8-adb-setup.sh
    ```
