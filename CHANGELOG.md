@@ -10,6 +10,11 @@ All notable changes to chot are listed here. The format follows [Keep a Changelo
 ### Changed
 - The app is called just "chot" on the home screen and in the app list.
 
+### Fixed
+- On a locked phone, a "Hey Google" you don't answer no longer keeps the screen on with the unlock prompt up. chot gives up 30s after the hotword if the phone is still locked (18).
+- Unticking "Auto-tap Claude Voice Mode waveform button" no longer stops chot from opening Claude when the widget press fails: the checkbox now only turns off the taps (19).
+- chot's timers no longer depend on the wall clock, so a time change after a reboot can't make the auto-tap give up at once or never (20).
+
 ## [1.0.1] - 2026-10-22
 
 ### Fixed

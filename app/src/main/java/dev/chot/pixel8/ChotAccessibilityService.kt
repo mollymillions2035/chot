@@ -25,7 +25,8 @@ import java.util.concurrent.atomic.AtomicLong
 class ChotAccessibilityService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
-    private val lastInterceptEpochMs = AtomicLong(0L)
+    // SystemClock.elapsedRealtime() of the last intercept, 0 before the first one
+    private val lastInterceptElapsedMs = AtomicLong(0L)
     private val isMicRecordingActive = AtomicBoolean(false)
     private val quickPhrasesLogged = AtomicBoolean(false)
 
@@ -223,13 +224,16 @@ class ChotAccessibilityService : AccessibilityService() {
         // Every automatic path (window events, mic callback) ends up here, so the pause switch is checked here
         if (!manual && !ChotPrefs.isEnabled(this)) return
 
-        val now = System.currentTimeMillis()
+        // elapsedRealtime, not the wall clock, which jumps when the time is set (a time sync after a reboot, say)
+        // and could then hold off intercepts or let duplicates through. Its count starts at boot, so 0 (no intercept
+        // yet) is checked for rather than measured from.
+        val now = SystemClock.elapsedRealtime()
         val cooldown = ChotPrefs.getCooldownMs(this)
-        val prev = lastInterceptEpochMs.get()
-        if (!manual && (now - prev) < cooldown) {
+        val prev = lastInterceptElapsedMs.get()
+        if (!manual && prev != 0L && (now - prev) < cooldown) {
             return
         }
-        lastInterceptEpochMs.set(now)
+        lastInterceptElapsedMs.set(now)
 
         if (!manual) {
             // Step 1: Dismiss Google Assistant / Gemini overlay immediately. A second BACK used to follow if the
@@ -294,21 +298,26 @@ class ChotAccessibilityService : AccessibilityService() {
     }
 
     private fun handleClaudeWindowEvent() {
-        val armedAt = claudeAutoTapArmedEpochMs.get()
+        val armedAt = claudeAutoTapArmedElapsedMs.get()
         if (armedAt == 0L) return
 
-        val elapsed = System.currentTimeMillis() - armedAt
-        if (elapsed > 6000L) {
-            claudeAutoTapArmedEpochMs.set(0L)
-            val seen = if (claudeWindowSeenAtMs.get() > 0L) "was seen" else "was never seen"
-            ChotPrefs.appendLog(this, "Auto-tap gave up after 6s, Claude's window $seen (focus: ${describeFocusedWindow()})")
-            return
+        // The auto-tap setting and the intent-only launch mode turn off only the steps that tap the Voice button or
+        // look for something to tap: the label search, the node dump and the coordinate fallback. Launching Claude
+        // when the widget press didn't open it, and logging voice mode or a lost window, tap nothing and still run.
+        // With tapping off, the arming ends once voice mode shows, or else at the 6s limit.
+        val tapOffReason = when {
+            !ChotPrefs.isAutoTapVoiceEnabled(this) -> "auto-tap is off"
+            ChotPrefs.getLaunchMode(this) == LaunchMode.ASSIST_INTENT_ONLY -> "the launch mode doesn't tap"
+            else -> null
         }
+        val tapping = tapOffReason == null
 
-        if (!ChotPrefs.isAutoTapVoiceEnabled(this) ||
-            ChotPrefs.getLaunchMode(this) == LaunchMode.ASSIST_INTENT_ONLY
-        ) {
-            claudeAutoTapArmedEpochMs.set(0L)
+        val elapsed = SystemClock.elapsedRealtime() - armedAt
+        if (elapsed > 6000L) {
+            claudeAutoTapArmedElapsedMs.set(0L)
+            val seen = if (claudeWindowSeenAtMs.get() > 0L) "was seen" else "was never seen"
+            val what = if (tapping) "Auto-tap gave up" else "Stopped waiting for voice mode ($tapOffReason)"
+            ChotPrefs.appendLog(this, "$what after 6s, Claude's window $seen (focus: ${describeFocusedWindow()})")
             return
         }
 
@@ -340,20 +349,20 @@ class ChotAccessibilityService : AccessibilityService() {
         for (root in roots) {
             // 1. Check if Claude is already in active Voice Mode UI
             if (isClaudeAlreadyInVoiceMode(root)) {
-                claudeAutoTapArmedEpochMs.set(0L)
+                claudeAutoTapArmedElapsedMs.set(0L)
                 // After a widget press, also log when Claude's window appeared, to tune WIDGET_OPEN_TIMEOUT_MS
                 val window = if (viaWidget) ", window at ${claudeWindowSeenAtMs.get()}ms" else ""
                 ChotPrefs.appendLog(this, "Claude Voice Mode is active and listening (${elapsed}ms$window)")
                 return
             }
 
-            if (elapsed < tapAllowedAfterMs) continue
+            if (!tapping || elapsed < tapAllowedAfterMs) continue
 
             // 2. Search for the Voice Mode ("Voice Mode" / "Talk") button in Claude's accessibility tree
             val voiceButton = findClaudeVoiceModeButton(root) ?: continue
             if (tapVoiceButton(voiceButton)) return
         }
-        if (elapsed < tapAllowedAfterMs) return
+        if (!tapping || elapsed < tapAllowedAfterMs) return
 
         // Dump visible Claude nodes once at ~1200ms if no Voice Mode button has been tapped yet
         if (elapsed >= 1200L && !diagnosticTreeDumped.getAndSet(true)) {
@@ -374,7 +383,7 @@ class ChotAccessibilityService : AccessibilityService() {
         ) {
             // A skipped tap leaves the auto-tap armed: the Voice button can still show up before the 6s limit
             if (dispatchCoordinateTap(roots)) {
-                claudeAutoTapArmedEpochMs.set(0L)
+                claudeAutoTapArmedElapsedMs.set(0L)
             }
         }
     }
@@ -411,7 +420,7 @@ class ChotAccessibilityService : AccessibilityService() {
             return false
         }
 
-        claudeAutoTapArmedEpochMs.set(0L)
+        claudeAutoTapArmedElapsedMs.set(0L)
         var gestureTapped = false
         if (!actionClicked) {
             gestureTapped = dispatchTapGesture(rect.exactCenterX(), rect.exactCenterY())
@@ -647,7 +656,9 @@ class ChotAccessibilityService : AccessibilityService() {
         var lastScreenOnElapsedMs = 0L
             private set
 
-        private val claudeAutoTapArmedEpochMs = AtomicLong(0L)
+        // SystemClock.elapsedRealtime() when the auto-tap was armed, 0 while it isn't. Not the wall clock, which jumps
+        // when the time is set and would make the elapsed time negative or huge.
+        private val claudeAutoTapArmedElapsedMs = AtomicLong(0L)
         private val coordinateFallbackScheduled = AtomicBoolean(false)
         private val diagnosticTreeDumped = AtomicBoolean(false)
         private val offScreenRetryLogged = AtomicBoolean(false)
@@ -682,7 +693,7 @@ class ChotAccessibilityService : AccessibilityService() {
             autoTapErrorLogged.set(false)
             noServiceLogged.set(false)
             launchedViaWidget.set(viaWidget)
-            claudeAutoTapArmedEpochMs.set(System.currentTimeMillis())
+            claudeAutoTapArmedElapsedMs.set(SystemClock.elapsedRealtime())
             schedulePoll(context.applicationContext, pollGeneration.incrementAndGet(), 100L)
         }
 
@@ -694,7 +705,7 @@ class ChotAccessibilityService : AccessibilityService() {
         private fun schedulePoll(context: Context, generation: Int, delayMs: Long) {
             pollHandler.postDelayed({
                 if (generation != pollGeneration.get()) return@postDelayed
-                val armedAt = claudeAutoTapArmedEpochMs.get()
+                val armedAt = claudeAutoTapArmedElapsedMs.get()
                 if (armedAt == 0L) return@postDelayed
 
                 val service = instance
@@ -704,11 +715,11 @@ class ChotAccessibilityService : AccessibilityService() {
                     if (!noServiceLogged.getAndSet(true)) {
                         ChotPrefs.appendLog(context, "Auto-tap: chot's accessibility service isn't connected")
                     }
-                    if (System.currentTimeMillis() - armedAt > 6000L) {
-                        claudeAutoTapArmedEpochMs.set(0L)
+                    if (SystemClock.elapsedRealtime() - armedAt > 6000L) {
+                        claudeAutoTapArmedElapsedMs.set(0L)
                     }
                 }
-                if (claudeAutoTapArmedEpochMs.get() != 0L) {
+                if (claudeAutoTapArmedElapsedMs.get() != 0L) {
                     schedulePoll(context, generation, 120L)
                 }
             }, delayMs)
