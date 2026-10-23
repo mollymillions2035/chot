@@ -57,8 +57,9 @@ You need a Pixel 8 with the official **Claude** app (`com.anthropic.claude`) ins
 2. Open chot and tap, in order:
    - **1. Enable Accessibility**, and turn chot on.
    - **2. Overlay Permission**, and allow it.
-   - **5. Notifications**, and allow them, so chot can tell you if a force-stop turns its service off.
+   - **3. Assistant Settings**, and check that Google (Gemini) is the digital assistant app. If it isn't, select it.
    - **4. Claude Widget (Voice chat button)**, and allow chot to create widgets. This one-time step lets chot start voice mode through Claude's own widget. Your home screen doesn't change.
+   - **5. Notifications**, and allow them, so chot can tell you if a force-stop turns its service off.
 3. Say **"Hey Google"**. Google's overlay closes, the mic is handed over, and Claude opens in voice mode.
 
 To update, install the newer release APK over the old one. Your setup is kept.
