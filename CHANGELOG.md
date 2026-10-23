@@ -4,6 +4,11 @@ All notable changes to chot are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-23
+
+### Fixed
+- After a force-stop, opening chot turns its accessibility service back on. Before, Android left it off and chot showed ACTION NEEDED and caught no "Hey Google" until you tapped "1. Enable Accessibility". If you turned chot off in Accessibility settings yourself, it stays off (25).
+
 ## [1.1.0] - 2026-10-23
 
 ### Added
@@ -65,7 +70,8 @@ All notable changes to chot are listed here. The format follows [Keep a Changelo
 ### Added
 - First release: a hardware DSP hotword bridge that hands "Hey Google" off to Claude voice mode on a stock Pixel 8. The APK is debug-signed; set up the phone with `scripts/pixel8-adb-setup.sh`.
 
-[Unreleased]: https://github.com/mollymillions2035/chot/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/mollymillions2035/chot/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/mollymillions2035/chot/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/mollymillions2035/chot/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/mollymillions2035/chot/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/mollymillions2035/chot/compare/v0.1.0...v1.0.0
