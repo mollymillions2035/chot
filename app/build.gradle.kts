@@ -11,8 +11,8 @@ android {
         applicationId = "dev.chot.pixel8"
         minSdk = 31
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.1.1"
+        versionCode = 6
+        versionName = "1.2.0"
     }
 
     buildTypes {
