@@ -4,6 +4,8 @@ All notable changes to chot are listed here. The format follows [Keep a Changelo
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-23
+
 ### Added
 - chot has an app icon: a lowercase c with a spark in its opening, on vermilion. On Android 13 and later it follows your themed-icon colors too.
 
@@ -63,7 +65,8 @@ All notable changes to chot are listed here. The format follows [Keep a Changelo
 ### Added
 - First release: a hardware DSP hotword bridge that hands "Hey Google" off to Claude voice mode on a stock Pixel 8. The APK is debug-signed; set up the phone with `scripts/pixel8-adb-setup.sh`.
 
-[Unreleased]: https://github.com/mollymillions2035/chot/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/mollymillions2035/chot/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/mollymillions2035/chot/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/mollymillions2035/chot/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/mollymillions2035/chot/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/mollymillions2035/chot/releases/tag/v0.1.0
