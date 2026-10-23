@@ -96,7 +96,7 @@ object ChotPrefs {
 
     /**
      * Whether chot's accessibility service should be on: set when it connects, cleared when Android unbinds it
-     * (turned off in Settings). A force-stop kills chot without either, so it stays set (25).
+     * (turned off in Settings). A force-stop kills chot without either, so it stays set (#61).
      */
     fun isServiceWanted(context: Context): Boolean =
         prefs(context).getBoolean(KEY_SERVICE_WANTED, false)

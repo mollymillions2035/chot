@@ -43,7 +43,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         // A force-stop makes Android drop chot from the enabled accessibility services, with no callback to chot.
-        // If the service was on before, opening chot turns it back on (25).
+        // If the service was on before, opening chot turns it back on (#61).
         if (ChotPrefs.isServiceWanted(this) && !isAccessibilityServiceEnabled() && tryAutoEnableAccessibilityService()) {
             ChotPrefs.appendLog(this, "Accessibility service was turned off by a force-stop: turned it back on")
         }

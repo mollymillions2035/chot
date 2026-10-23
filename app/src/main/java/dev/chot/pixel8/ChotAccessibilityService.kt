@@ -85,7 +85,7 @@ class ChotAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    // Android unbinds the service when it's turned off in Settings, so chot won't turn it back on (25).
+    // Android unbinds the service when it's turned off in Settings, so chot won't turn it back on (#61).
     // A uiautomator dump unbinds and rebinds, and onServiceConnected sets it again.
     override fun onUnbind(intent: Intent?): Boolean {
         ChotPrefs.setServiceWanted(this, false)
