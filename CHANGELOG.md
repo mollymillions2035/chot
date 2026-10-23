@@ -9,11 +9,19 @@ All notable changes to chot are listed here. The format follows [Keep a Changelo
 
 ### Changed
 - The app is called just "chot" on the home screen and in the app list.
+- `scripts/build-apk.sh` checks the system JDK (17 to 21) and Gradle (8.x) versions and falls back to its portable downloads in `.toolchain/` when they don't match, saying why.
+
+### Removed
+- The `KILL_BACKGROUND_PROCESSES` and `WAKE_LOCK` permissions. chot asked Android to kill Google's background processes after each intercept, which has done nothing since Android 14, and never held a wake lock.
 
 ### Fixed
 - On a locked phone, a "Hey Google" you don't answer no longer keeps the screen on with the unlock prompt up. chot gives up 30s after the hotword if the phone is still locked (18).
 - Unticking "Auto-tap Claude Voice Mode waveform button" no longer stops chot from opening Claude when the widget press fails: the checkbox now only turns off the taps (19).
 - chot's timers no longer depend on the wall clock, so a time change after a reboot can't make the auto-tap give up at once or never (20).
+- Saving the waveform coordinates with an empty or unreadable field keeps the current value instead of a hard-coded one 38px off the Voice button (21).
+- With no default digital assistant set, chot's status now says "Hey Google" is off and where to choose Google, instead of showing READY (22).
+- chot's accessibility service now receives screen events only from Google, Gemini and Claude, instead of inspecting every app's screen changes (23).
+- The diagnostic dump of Claude's screen, taken when the Voice button isn't found, no longer records chat titles or message text in chot's log, only the labels of controls and the length of other text (24).
 
 ## [1.0.1] - 2026-10-22
 

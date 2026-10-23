@@ -7,8 +7,22 @@ TOOLCHAIN_DIR="$PROJECT_DIR/.toolchain"
 
 mkdir -p "$TOOLCHAIN_DIR"
 
-# 1. Ensure JDK 17 is available
+# 1. Ensure a JDK is available. AGP 8.5.2 / Kotlin 1.9.24 run on JDK 17 to 21; anything else (an old system JDK 11,
+#    a brand-new one Kotlin doesn't know yet) falls back to the portable Temurin 17 in .toolchain/.
+system_javac_major() {
+    # "javac 17.0.12" -> 17, "javac 1.8.0_392" -> 8
+    javac -version 2>&1 | sed -nE 's/^javac (1\.)?([0-9]+).*/\2/p'
+}
+USE_SYSTEM_JDK=0
 if command -v javac >/dev/null 2>&1; then
+    JAVAC_MAJOR="$(system_javac_major)"
+    if [ -n "$JAVAC_MAJOR" ] && [ "$JAVAC_MAJOR" -ge 17 ] && [ "$JAVAC_MAJOR" -le 21 ]; then
+        USE_SYSTEM_JDK=1
+    else
+        echo "==> System JDK is $(javac -version 2>&1), not 17-21 as AGP 8.5.2 / Kotlin 1.9.24 need: using the portable JDK 17 instead"
+    fi
+fi
+if [ "$USE_SYSTEM_JDK" = 1 ]; then
     echo "==> Using system JDK: $(javac -version 2>&1)"
 else
     JDK_DIR="$TOOLCHAIN_DIR/jdk-17"
@@ -57,10 +71,22 @@ if [ ! -d "$SDK_DIR/platforms/android-34" ] || [ ! -d "$SDK_DIR/build-tools/34.0
     sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 fi
 
-# 3. Ensure Gradle 8.7 is available
+# 3. Ensure Gradle 8.x is available (AGP 8.5.2 needs 8.2 or later; Gradle 9 drops APIs it uses). A system Gradle of
+#    another major version falls back to the portable Gradle 8.7 in .toolchain/.
+system_gradle_major() {
+    gradle --version 2>/dev/null | sed -nE 's/^Gradle ([0-9]+)\..*/\1/p' | head -n1
+}
+GRADLE_BIN=""
 if command -v gradle >/dev/null 2>&1; then
-    GRADLE_BIN="gradle"
-else
+    GRADLE_MAJOR="$(system_gradle_major)"
+    if [ "$GRADLE_MAJOR" = 8 ]; then
+        GRADLE_BIN="gradle"
+        echo "==> Using system Gradle $(gradle --version 2>/dev/null | sed -nE 's/^Gradle (.*)/\1/p' | head -n1)"
+    else
+        echo "==> System Gradle is ${GRADLE_MAJOR:-unknown}.x, not 8.x as AGP 8.5.2 needs: using the portable Gradle 8.7 instead"
+    fi
+fi
+if [ -z "$GRADLE_BIN" ]; then
     GRADLE_DIR="$TOOLCHAIN_DIR/gradle-8.7"
     if [ ! -x "$GRADLE_DIR/bin/gradle" ]; then
         echo "==> Downloading Gradle 8.7..."
@@ -71,6 +97,7 @@ else
         rm -f "$TOOLCHAIN_DIR/gradle.zip"
     fi
     GRADLE_BIN="$GRADLE_DIR/bin/gradle"
+    echo "==> Using portable Gradle 8.7"
 fi
 
 # 4. Write local.properties and build the APK

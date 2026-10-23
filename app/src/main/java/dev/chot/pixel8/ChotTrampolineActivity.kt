@@ -1,7 +1,6 @@
 package dev.chot.pixel8
 
 import android.app.Activity
-import android.app.ActivityManager
 import android.app.KeyguardManager
 import android.content.Context
 import android.media.AudioAttributes
@@ -163,15 +162,7 @@ class ChotTrampolineActivity : Activity() {
         } catch (_: Exception) {
         }
 
-        // 2. Ask ActivityManager to clean up any backgrounded Google Assistant / Gemini processes
-        try {
-            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            am.killBackgroundProcesses("com.google.android.googlequicksearchbox")
-            am.killBackgroundProcesses("com.google.android.apps.bard")
-        } catch (_: Exception) {
-        }
-
-        // 3. Poll activeRecordingConfigurations (every 20ms, up to 340ms max) until Google releases the mic
+        // 2. Poll activeRecordingConfigurations (every 20ms, up to 340ms max) until Google releases the mic
         val maxWaitMs = 340L
         var voiceChatButton: View? = null
         var widgetLayoutMs = -1L

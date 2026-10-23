@@ -35,7 +35,6 @@ object ChotPrefs {
     private const val KEY_COORDINATE_FALLBACK = "coordinate_fallback"
     private const val KEY_TAP_X_PCT = "tap_x_pct"
     private const val KEY_TAP_Y_PCT = "tap_y_pct"
-    private const val KEY_COOLDOWN_MS = "cooldown_ms"
     private const val KEY_LOGS = "event_logs"
     private const val KEY_CLAUDE_WIDGET_ID = "claude_widget_id"
 
@@ -85,13 +84,6 @@ object ChotPrefs {
             .putFloat(KEY_TAP_X_PCT, xPct.coerceIn(0.05f, 0.98f))
             .putFloat(KEY_TAP_Y_PCT, yPct.coerceIn(0.05f, 0.98f))
             .apply()
-    }
-
-    fun getCooldownMs(context: Context): Long =
-        prefs(context).getLong(KEY_COOLDOWN_MS, 2500L)
-
-    fun setCooldownMs(context: Context, ms: Long) {
-        prefs(context).edit().putLong(KEY_COOLDOWN_MS, ms.coerceIn(800L, 10000L)).apply()
     }
 
     fun getClaudeWidgetId(context: Context): Int =

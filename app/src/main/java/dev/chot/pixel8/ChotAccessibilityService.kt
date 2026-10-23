@@ -228,9 +228,8 @@ class ChotAccessibilityService : AccessibilityService() {
         // and could then hold off intercepts or let duplicates through. Its count starts at boot, so 0 (no intercept
         // yet) is checked for rather than measured from.
         val now = SystemClock.elapsedRealtime()
-        val cooldown = ChotPrefs.getCooldownMs(this)
         val prev = lastInterceptElapsedMs.get()
-        if (!manual && prev != 0L && (now - prev) < cooldown) {
+        if (!manual && prev != 0L && (now - prev) < INTERCEPT_COOLDOWN_MS) {
             return
         }
         lastInterceptElapsedMs.set(now)
@@ -463,15 +462,19 @@ class ChotAccessibilityService : AccessibilityService() {
     private fun collectNodeSummary(node: AccessibilityNodeInfo, depth: Int, out: MutableList<String>) {
         if (depth > 40 || out.size >= 25) return
         val rawText = node.text?.toString().orEmpty()
-        // A text box's text is the owner's draft: log only that there is one, not what it says. Untrimmed, so a
-        // draft of only spaces or newlines shows up too.
+        val id = node.viewIdResourceName?.substringAfterLast('/')?.trim().orEmpty()
+        // This dump lands in chot's persistent log, so it keeps only UI labels. A text box's text is the owner's
+        // draft, and the text of a plain node is a chat title or a message: log only that there is one and how long
+        // it is, not what it says. Untrimmed, so a draft of only spaces or newlines shows up too. Text on a clickable
+        // node or a node with a view id is a control's label, which is what the dump is for.
         val t = if (node.isEditable && rawText.isNotEmpty() && !node.isShowingHintText) {
             "<draft, ${rawText.length} chars>"
+        } else if (rawText.isNotEmpty() && !node.isClickable && id.isEmpty()) {
+            "<text, ${rawText.length} chars>"
         } else {
             rawText.trim()
         }
         val d = node.contentDescription?.toString()?.trim().orEmpty()
-        val id = node.viewIdResourceName?.substringAfterLast('/')?.trim().orEmpty()
         if (t.isNotEmpty() || d.isNotEmpty() || id.isNotEmpty() || node.isClickable) {
             val r = Rect()
             node.getBoundsInScreen(r)
@@ -544,18 +547,6 @@ class ChotAccessibilityService : AccessibilityService() {
             if (found != null) return found
         }
         return null
-    }
-
-    private fun performClickOrTapNode(node: AccessibilityNodeInfo): Boolean {
-        if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-            return true
-        }
-        val rect = Rect()
-        node.getBoundsInScreen(rect)
-        if (!rect.isEmpty) {
-            return dispatchTapGesture(rect.exactCenterX(), rect.exactCenterY())
-        }
-        return false
     }
 
     /**
@@ -745,6 +736,10 @@ class ChotAccessibilityService : AccessibilityService() {
 
         // AccessibilityWindowManager maps WindowManager's TYPE_VOICE_INTERACTION to no AccessibilityWindowInfo type
         private const val VOICE_INTERACTION_WINDOW_TYPE = -1
+
+        // One "Hey Google" raises several events (the overlay's window state, its content, the mic callback), all
+        // within well under this; a second intercept this soon would send a BACK into Claude
+        private const val INTERCEPT_COOLDOWN_MS = 2500L
 
         private val ASSISTANT_OVERLAY_CLASSES = listOf(
             GEMINI_OVERLAY_ACTIVITY,
