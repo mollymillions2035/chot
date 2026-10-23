@@ -49,9 +49,10 @@ adb install -r "$APK_PATH"
 PKG="dev.chot.pixel8"
 SVC="$PKG/$PKG.ChotAccessibilityService"
 
-echo "==> 2/6 Granting privileged ADB permissions (WRITE_SECURE_SETTINGS, SYSTEM_ALERT_WINDOW, Claude RECORD_AUDIO)..."
-adb shell pm grant "$PKG" android.permission.WRITE_SECURE_SETTINGS || true
+echo "==> 2/6 Granting permissions (SYSTEM_ALERT_WINDOW, chot POST_NOTIFICATIONS, Claude RECORD_AUDIO)..."
+# chot no longer holds WRITE_SECURE_SETTINGS (#64): it notifies when a force-stop has turned its service off
 adb shell appops set "$PKG" SYSTEM_ALERT_WINDOW allow || true
+adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS 2>/dev/null || true
 adb shell pm grant com.anthropic.claude android.permission.RECORD_AUDIO 2>/dev/null || true
 adb shell pm grant com.anthropic.claude android.permission.POST_NOTIFICATIONS 2>/dev/null || true
 
