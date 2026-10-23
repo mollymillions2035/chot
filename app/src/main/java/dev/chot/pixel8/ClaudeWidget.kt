@@ -14,7 +14,7 @@ import android.view.ViewGroup
 /**
  * chot's own copy of Claude's home-screen widget, never shown. The widget's "Voice chat" button fires Claude's own
  * PendingIntent, which starts voice mode by itself whatever screen Claude is on, including with a draft in the
- * text box or a Claude Code session open (issues 14 and 15). Pressing it doesn't depend on reading Claude's screen.
+ * text box or a Claude Code session open (#48 and #49). Pressing it doesn't depend on reading Claude's screen.
  * Binding the copy takes a one-time system prompt.
  */
 object ClaudeWidget {
@@ -111,7 +111,7 @@ object ClaudeWidget {
         // The label sits on the button's icon; the click goes to the nearest parent that handles it
         val button = generateSequence(labeled) { it.parent as? View }.firstOrNull { it.hasOnClickListeners() }
         if (button == null) {
-            // A stale copy shows only "Claude" (issue 17). Nothing else asks Claude to redraw a never-shown widget,
+            // A stale copy shows only "Claude" (#51). Nothing else asks Claude to redraw a never-shown widget,
             // so chot does: the options change reaches Claude's provider, and the next press finds the button
             val redraw = try {
                 AppWidgetManager.getInstance(activity).updateAppWidgetOptions(id, sizeOptions())
