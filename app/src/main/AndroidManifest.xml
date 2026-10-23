@@ -2,12 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Allows killing lingering Google Assistant background audio/processes after dismiss -->
-    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <!-- Guarantees Background Activity Launch (BAL) exemption on Android 14/15/16 when launching Claude -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- Optional: Wakes screen when hotword triggers on AOD / lock screen -->
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Optional: Allows automatic self-healing of accessibility settings via ADB:
          adb shell pm grant dev.chot.pixel8 android.permission.WRITE_SECURE_SETTINGS -->
     <uses-permission

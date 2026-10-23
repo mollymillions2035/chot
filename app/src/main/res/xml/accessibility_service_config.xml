@@ -7,4 +7,5 @@
     android:canRetrieveWindowContent="true"
     android:description="@string/accessibility_service_description"
     android:notificationTimeout="20"
+    android:packageNames="com.google.android.googlequicksearchbox,com.google.android.apps.bard,com.anthropic.claude"
     android:settingsActivity="dev.chot.pixel8.MainActivity" />

@@ -251,8 +251,10 @@ class MainActivity : Activity() {
             setTextColor(Color.parseColor("#9CA3AF"))
         })
         coordRow.addView(styledButton("Save", "#252A38") {
-            val x = (xInput.text.toString().toFloatOrNull() ?: 88.5f) / 100f
-            val y = (yInput.text.toString().toFloatOrNull() ?: 91.5f) / 100f
+            // An empty or unreadable field keeps its current value: a hard-coded fallback here used to differ from
+            // ChotPrefs' defaults and moved the tap 38px off the Voice button when the Y field was cleared
+            val x = xInput.text.toString().toFloatOrNull()?.div(100f) ?: ChotPrefs.getTapXPercent(this)
+            val y = yInput.text.toString().toFloatOrNull()?.div(100f) ?: ChotPrefs.getTapYPercent(this)
             ChotPrefs.setTapPercent(this, x, y)
             Toast.makeText(this, "Saved waveform tap coordinates (${(x * 100).toInt()}%, ${(y * 100).toInt()}%)", Toast.LENGTH_SHORT).show()
         })
@@ -340,10 +342,12 @@ class MainActivity : Activity() {
         } catch (_: Exception) {
             ""
         }
-        val isGoogleDefault = voiceInteractionService.contains("googlequicksearchbox", ignoreCase = true) ||
-            voiceInteractionService.isEmpty()
+        // Empty means no digital assistant at all, so there's no hotword detection either
+        val isGoogleDefault = voiceInteractionService.contains("googlequicksearchbox", ignoreCase = true)
         val assistantMsg = if (isGoogleDefault) {
             "Google is Default Assistant → Pixel 8 Tensor G3 \"Hey Google\" DSP is ACTIVE"
+        } else if (voiceInteractionService.isEmpty()) {
+            "No default digital assistant, so \"Hey Google\" is off. Choose Google (Gemini) in Settings > Apps > Default apps > Digital assistant app"
         } else {
             "WARNING: Default Assistant is '$voiceInteractionService'. Set it back to Google (Gemini) in Settings > Apps > Default apps > Digital assistant app so Pixel 8 hardware \"Hey Google\" DSP stays active!"
         }
